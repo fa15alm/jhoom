@@ -31,7 +31,7 @@ It aims to help users stay active by combining workout tracking with a social fe
 ## Getting Started (Development)
 
 1. Clone the repo:
-   - `git clone <repo-url>`
+   - `git clone https://github.com/fa15alm/jhoom`
    - `cd jhoom`
 
 2. Backend:
