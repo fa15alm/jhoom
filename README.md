@@ -24,7 +24,7 @@ It aims to help users stay active by combining workout tracking with a social fe
 
 ## Project Structure
 
-- `mobile/` – React Native (Expo) app
+- `mobile/` – React Native (Expo) app **(WIP)**
 - `server/` – Express server and SQLite database
 - `docs/` – Documentation (API reference, code style, etc.)
 
