@@ -3,19 +3,18 @@ import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Dimensions,
   Easing,
   FlatList,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import useMobileFrame from "../hooks/useMobileFrame";
 
-const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 72;
 const CARD_SPACING = 18;
 const SHIMMER_TRAVEL = 220;
 
@@ -24,33 +23,29 @@ const slides = [
     eyebrow: "Welcome",
     title: "Start your health journey with Jhoom",
     text: "Track the essentials, stay consistent, and keep your routine simple from one mobile-first dashboard with AI Built in.",
-    accent: "#16A34A",
     kind: "greeting",
   },
   {
     eyebrow: "Workout tracking",
     title: "Log sessions and build momentum",
     text: "Record workouts quickly and see your weekly effort without digging through multiple screens.",
-    accent: "#16A34A",
     kind: "feature",
   },
   {
     eyebrow: "Nutrition overview",
     title: "Keep meals and calories in check",
     text: "Stay on top of your food intake with a clear summary designed for fast mobile check-ins.",
-    accent: "#16A34A",
     kind: "feature",
   },
   {
     eyebrow: "Progress feedback",
     title: "Watch habits turn into results",
     text: "See streaks, milestones, and simple progress signals that keep you moving forward each week.",
-    accent: "#16A34A",
     kind: "feature",
   },
 ];
 
-function ActionButton({ href, label, variant = "primary" }) {
+function ActionButton({ href, label, variant = "primary", compact = false }) {
   const isPrimary = variant === "primary";
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
@@ -84,6 +79,7 @@ function ActionButton({ href, label, variant = "primary" }) {
         style={({ pressed }) => [
           styles.actionButton,
           isPrimary ? styles.primaryButton : styles.secondaryButton,
+          compact && styles.compactButton,
           pressed && styles.buttonPressed,
         ]}
       >
@@ -118,6 +114,7 @@ function ActionButton({ href, label, variant = "primary" }) {
           style={[
             styles.actionButtonText,
             isPrimary ? styles.primaryButtonText : styles.secondaryButtonText,
+            compact && styles.compactButtonText,
           ]}
         >
           {label}
@@ -127,27 +124,63 @@ function ActionButton({ href, label, variant = "primary" }) {
   );
 }
 
-function FeatureCard({ item }) {
+function FeatureCard({ item, cardWidth, compact, short }) {
+  const cardStyle = [
+    styles.featureCard,
+    item.kind === "greeting" && styles.greetingCard,
+    {
+      width: cardWidth,
+      minHeight: short ? 280 : 314,
+      paddingHorizontal: compact ? 18 : 24,
+      paddingVertical: compact ? 22 : 28,
+    },
+  ];
+
   if (item.kind === "greeting") {
     return (
-      <View style={[styles.featureCard, styles.greetingCard]}>
-        <Text style={styles.featureEyebrow}>{item.eyebrow}</Text>
-        <Text style={styles.greetingTitle}>{item.title}</Text>
-        <Text style={styles.greetingText}>{item.text}</Text>
+      <View style={cardStyle}>
+        <Text style={[styles.featureEyebrow, compact && styles.compactEyebrow]}>
+          {item.eyebrow}
+        </Text>
+        <Text style={[styles.greetingTitle, compact && styles.compactGreetingTitle]}>
+          {item.title}
+        </Text>
+        <Text style={[styles.greetingText, compact && styles.compactBodyText]}>
+          {item.text}
+        </Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.featureCard}>
-      <Text style={styles.featureEyebrow}>{item.eyebrow}</Text>
-      <Text style={styles.featureTitle}>{item.title}</Text>
-      <Text style={styles.featureText}>{item.text}</Text>
+    <View style={cardStyle}>
+      <Text style={[styles.featureEyebrow, compact && styles.compactEyebrow]}>
+        {item.eyebrow}
+      </Text>
+      <Text style={[styles.featureTitle, compact && styles.compactFeatureTitle]}>
+        {item.title}
+      </Text>
+      <Text style={[styles.featureText, compact && styles.compactBodyText]}>
+        {item.text}
+      </Text>
     </View>
   );
 }
 
 export default function LandingPage() {
+  const {
+    isCompactWidth,
+    isShortHeight,
+    shellPaddingHorizontal,
+    shellPaddingVertical,
+    innerPaddingHorizontal,
+    innerPaddingTop,
+    innerPaddingBottom,
+    shellMinHeight,
+    sliderWidth,
+    cardWidth,
+    wordmarkSize,
+  } = useMobileFrame();
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef(null);
   const viewabilityConfig = useRef({
@@ -161,54 +194,84 @@ export default function LandingPage() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.outerShell}>
-        <View style={styles.inner}>
-          <View style={styles.headerSection}>
-            <Text style={styles.title}>Jhoom.</Text>
-          </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <View
+          style={[
+            styles.outerShell,
+            {
+              paddingHorizontal: shellPaddingHorizontal,
+              paddingVertical: shellPaddingVertical,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.inner,
+              {
+                minHeight: shellMinHeight,
+                paddingHorizontal: innerPaddingHorizontal,
+                paddingTop: innerPaddingTop,
+                paddingBottom: innerPaddingBottom,
+              },
+            ]}
+          >
+            <View style={[styles.headerSection, isShortHeight && styles.compactHeaderSection]}>
+              <Text style={[styles.title, { fontSize: wordmarkSize }]}>Jhoom.</Text>
+            </View>
 
-          <View style={styles.sliderSection}>
-            <FlatList
-              ref={listRef}
-              data={slides}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(_, index) => index.toString()}
-              style={styles.sliderList}
-              contentContainerStyle={styles.sliderContent}
-              renderItem={({ item }) => <FeatureCard item={item} />}
-              onViewableItemsChanged={onViewableItemsChanged}
-              viewabilityConfig={viewabilityConfig}
-            />
+            <View style={styles.sliderSection}>
+              <FlatList
+                ref={listRef}
+                data={slides}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(_, index) => index.toString()}
+                style={[styles.sliderList, { width: sliderWidth }]}
+                contentContainerStyle={styles.sliderContent}
+                renderItem={({ item }) => (
+                  <FeatureCard
+                    item={item}
+                    cardWidth={cardWidth}
+                    compact={isCompactWidth}
+                    short={isShortHeight}
+                  />
+                )}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
+              />
 
-            <View style={styles.dotsRow}>
-              {slides.map((_, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.dot,
-                    activeIndex === index && styles.activeDot,
-                  ]}
-                />
-              ))}
+              <View style={styles.dotsRow}>
+                {slides.map((_, index) => (
+                  <View
+                    key={index}
+                    style={[styles.dot, activeIndex === index && styles.activeDot]}
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
+              <ActionButton
+                href="/(auth)/login"
+                label="Login"
+                variant="secondary"
+                compact={isCompactWidth}
+              />
+              <ActionButton
+                href="/(auth)/register"
+                label="Sign up"
+                variant="primary"
+                compact={isCompactWidth}
+              />
             </View>
           </View>
-
-          <View style={styles.bottomSection}>
-            <ActionButton
-              href="/(auth)/login"
-              label="Login"
-              variant="secondary"
-            />
-            <ActionButton
-              href="/(auth)/register"
-              label="Sign up"
-              variant="primary"
-            />
-          </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -218,26 +281,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F7F8FB",
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   outerShell: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 18,
+    flexGrow: 1,
   },
   inner: {
-    flex: 1,
+    flexGrow: 1,
     borderRadius: 38,
     backgroundColor: "#F7F8FB",
-    paddingHorizontal: 20,
-    paddingTop: 34,
-    paddingBottom: 26,
   },
   headerSection: {
     alignItems: "center",
     paddingTop: 42,
     marginBottom: 28,
   },
+  compactHeaderSection: {
+    paddingTop: 24,
+    marginBottom: 22,
+  },
   title: {
-    fontSize: 52,
     fontWeight: "600",
     color: "#111827",
     letterSpacing: 0.1,
@@ -256,22 +320,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   sliderList: {
-    width: CARD_WIDTH,
     flexGrow: 0,
   },
   sliderContent: {
     alignItems: "center",
   },
   featureCard: {
-    width: CARD_WIDTH - CARD_SPACING * 2,
     marginHorizontal: CARD_SPACING,
     backgroundColor: "#ECFDF3",
     borderRadius: 30,
     borderWidth: 1,
     borderColor: "#CFEFD9",
-    paddingHorizontal: 24,
-    paddingVertical: 28,
-    minHeight: 314,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -286,6 +345,10 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 1,
   },
+  compactEyebrow: {
+    fontSize: 12,
+    marginBottom: 10,
+  },
   featureTitle: {
     fontSize: 28,
     fontWeight: "600",
@@ -293,6 +356,10 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     marginBottom: 12,
     textAlign: "center",
+  },
+  compactFeatureTitle: {
+    fontSize: 24,
+    lineHeight: 30,
   },
   featureText: {
     fontSize: 15,
@@ -307,6 +374,14 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     marginBottom: 12,
     textAlign: "center",
+  },
+  compactGreetingTitle: {
+    fontSize: 26,
+    lineHeight: 32,
+  },
+  compactBodyText: {
+    fontSize: 14,
+    lineHeight: 22,
   },
   greetingText: {
     fontSize: 16,
@@ -328,7 +403,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 5,
   },
   activeDot: {
-    width: 8,
     backgroundColor: "#111827",
   },
   bottomSection: {
@@ -340,6 +414,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingBottom: 14,
     width: "100%",
+  },
+  compactBottomSection: {
+    gap: 10,
+    paddingHorizontal: 0,
+    paddingBottom: 8,
   },
   actionButtonSlot: {
     flex: 1,
@@ -353,6 +432,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     overflow: "hidden",
     position: "relative",
+  },
+  compactButton: {
+    paddingHorizontal: 12,
   },
   primaryButton: {
     backgroundColor: "#16A34A",
@@ -389,6 +471,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
     zIndex: 1,
+  },
+  compactButtonText: {
+    fontSize: 14,
   },
   primaryButtonText: {
     color: "#FFFFFF",

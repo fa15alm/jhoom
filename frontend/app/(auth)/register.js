@@ -4,26 +4,37 @@ import { useRouter } from "expo-router";
 import { useEffect, useRef } from "react";
 import {
   Animated,
-  Dimensions,
   Easing,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import useMobileFrame from "../../hooks/useMobileFrame";
 
-const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 72;
 const CARD_GAP = 18;
-const FORM_WIDTH = CARD_WIDTH - CARD_GAP * 2;
 const SHIMMER_TRAVEL = 220;
 
 export default function RegisterScreen() {
+  const {
+    isCompactWidth,
+    isShortHeight,
+    shellPaddingHorizontal,
+    shellPaddingVertical,
+    innerPaddingHorizontal,
+    innerPaddingTop,
+    innerPaddingBottom,
+    shellMinHeight,
+    sliderWidth,
+    wordmarkSize,
+  } = useMobileFrame();
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
+  const formWidth = sliderWidth - CARD_GAP * 2;
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -45,95 +56,130 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.outerShell}>
-        <View style={styles.inner}>
-          <View style={styles.headerSection}>
-            <Text style={styles.wordmark}>Jhoom.</Text>
-          </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <View
+          style={[
+            styles.outerShell,
+            {
+              paddingHorizontal: shellPaddingHorizontal,
+              paddingVertical: shellPaddingVertical,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.inner,
+              {
+                minHeight: Math.max(shellMinHeight, 700),
+                paddingHorizontal: innerPaddingHorizontal,
+                paddingTop: innerPaddingTop,
+                paddingBottom: innerPaddingBottom,
+              },
+            ]}
+          >
+            <View style={[styles.headerSection, isShortHeight && styles.compactHeaderSection]}>
+              <Text style={[styles.wordmark, { fontSize: wordmarkSize }]}>Jhoom.</Text>
+            </View>
 
-          <View style={styles.contentSection}>
-            <View style={styles.contentStack}>
-              <View style={styles.formAnchor}>
-                <View style={styles.formSection}>
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Email</Text>
-                    <TextInput
-                      placeholder="Enter your email"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      autoCapitalize="none"
-                    />
-                  </View>
+            <View style={styles.contentSection}>
+              <View
+                style={[
+                  styles.contentStack,
+                  {
+                    width: formWidth,
+                    minHeight: isShortHeight ? 280 : 314,
+                  },
+                ]}
+              >
+                <View style={[styles.formAnchor, { width: formWidth }]}>
+                  <View style={styles.formSection}>
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Username</Text>
+                      <TextInput
+                        placeholder="Enter your Username"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        autoCapitalize="none"
+                      />
+                    </View>
 
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Password</Text>
-                    <TextInput
-                      placeholder="Create a password"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      secureTextEntry
-                    />
-                  </View>
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Email</Text>
+                      <TextInput
+                        placeholder="Enter your Email"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        autoCapitalize="none"
+                      />
+                    </View>
 
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Confirm Password</Text>
-                    <TextInput
-                      placeholder="Confirm your password"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      secureTextEntry
-                    />
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Password</Text>
+                      <TextInput
+                        placeholder="Create a password"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        secureTextEntry
+                      />
+                    </View>
                   </View>
                 </View>
               </View>
             </View>
-          </View>
 
-          <View style={styles.bottomSection}>
-            <Pressable style={styles.uploadSection}>
-              <View style={styles.uploadCircle}>
-                <Ionicons name="arrow-up-outline" size={24} color="#4EA955" />
-              </View>
-              <Text style={styles.uploadText}>Upload profile photo</Text>
-            </Pressable>
+            <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
+              <Pressable style={styles.uploadSection}>
+                <View style={styles.uploadCircle}>
+                  <Ionicons name="arrow-up-outline" size={24} color="#4EA955" />
+                </View>
+                <Text style={styles.uploadText}>Upload profile photo</Text>
+              </Pressable>
 
-            <Pressable
-              onPress={() => router.replace("/(onboarding)/welcome")}
-              style={({ pressed }) => [
-                styles.submitButton,
-                pressed && styles.buttonPressed,
-              ]}
-            >
-              <View pointerEvents="none" style={styles.submitBackground}>
-                <LinearGradient
-                  colors={["#5FBE67", "#4EA955", "#469A4D"]}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={styles.submitGradient}
-                />
-                <Animated.View
-                  style={[
-                    styles.shimmerWrap,
-                    { transform: [{ translateX: shimmerX }] },
-                  ]}
-                >
+              <Pressable
+                onPress={() => router.replace("/(onboarding)/basic-info")}
+                style={({ pressed }) => [
+                  styles.submitButton,
+                  { width: formWidth },
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View pointerEvents="none" style={styles.submitBackground}>
                   <LinearGradient
-                    colors={[
-                      "rgba(255,255,255,0)",
-                      "rgba(255,255,255,0.26)",
-                      "rgba(255,255,255,0)",
-                    ]}
+                    colors={["#5FBE67", "#4EA955", "#469A4D"]}
                     start={{ x: 0, y: 0.5 }}
                     end={{ x: 1, y: 0.5 }}
-                    style={styles.shimmer}
+                    style={styles.submitGradient}
                   />
-                </Animated.View>
-              </View>
-              <Text style={styles.submitText}>Complete sign up</Text>
-            </Pressable>
+                  <Animated.View
+                    style={[
+                      styles.shimmerWrap,
+                      { transform: [{ translateX: shimmerX }] },
+                    ]}
+                  >
+                    <LinearGradient
+                      colors={[
+                        "rgba(255,255,255,0)",
+                        "rgba(255,255,255,0.26)",
+                        "rgba(255,255,255,0)",
+                      ]}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmer}
+                    />
+                  </Animated.View>
+                </View>
+                <Text style={[styles.submitText, isCompactWidth && styles.compactSubmitText]}>
+                  Complete sign up
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -143,26 +189,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F7F8FB",
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   outerShell: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 18,
+    flexGrow: 1,
   },
   inner: {
-    flex: 1,
+    flexGrow: 1,
     borderRadius: 38,
     backgroundColor: "#F7F8FB",
-    paddingHorizontal: 20,
-    paddingTop: 34,
-    paddingBottom: 26,
   },
   headerSection: {
     alignItems: "center",
     paddingTop: 42,
     marginBottom: 28,
   },
+  compactHeaderSection: {
+    paddingTop: 24,
+    marginBottom: 22,
+  },
   wordmark: {
-    fontSize: 52,
     fontWeight: "600",
     color: "#111827",
     letterSpacing: 0.1,
@@ -181,17 +228,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   contentStack: {
-    width: FORM_WIDTH,
-    minHeight: 314,
     justifyContent: "flex-end",
     alignItems: "center",
   },
-  uploadSection: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
   formAnchor: {
-    width: FORM_WIDTH,
     justifyContent: "flex-end",
   },
   formSection: {
@@ -199,7 +239,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   fieldGroup: {
-    width: FORM_WIDTH,
     gap: 8,
   },
   label: {
@@ -217,6 +256,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     fontSize: 11,
     color: "#111827",
+  },
+  uploadSection: {
+    alignItems: "center",
+    marginBottom: 20,
   },
   uploadCircle: {
     width: 56,
@@ -240,8 +283,11 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     width: "100%",
   },
+  compactBottomSection: {
+    paddingHorizontal: 0,
+    paddingBottom: 8,
+  },
   submitButton: {
-    width: FORM_WIDTH,
     height: 54,
     borderRadius: 999,
     justifyContent: "center",
@@ -273,6 +319,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
     zIndex: 1,
+  },
+  compactSubmitText: {
+    fontSize: 14,
   },
   buttonPressed: {
     opacity: 0.92,
