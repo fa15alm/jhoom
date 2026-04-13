@@ -24,7 +24,7 @@ async function setupDb() {
       user_id INTEGER UNIQUE NOT NULL,
       username TEXT UNIQUE NOT NULL,
       full_name TEXT,
-      age INTEGER,
+      date_of_birth TEXT,
       height_cm REAL,
       weight_kg REAL,
       bio TEXT,
