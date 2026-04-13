@@ -28,14 +28,14 @@ async function seed() {
 
 //PROFILES
   const profiles = [
-    { user_id: 1, username: "testuser1", full_name: "Test User One", age: 25, height_cm: 170, weight_kg: 65, bio: "I love fitness!" },
-    { user_id: 2, username: "testuser2", full_name: "Test User Two", age: 30, height_cm: 180, weight_kg: 75, bio: "Gym enthusiast." },
+    { user_id: 1, username: "testuser1", full_name: "Test User One", date_of_birth: "2000-05-15", height_cm: 170, weight_kg: 65, bio: "I love fitness!" },
+    { user_id: 2, username: "testuser2", full_name: "Test User Two", date_of_birth: "1995-09-20", height_cm: 180, weight_kg: 75, bio: "Gym enthusiast." },
   ];
 
   for (const p of profiles) {
     await db.run(
-      "INSERT INTO profiles (user_id, username, full_name, age, height_cm, weight_kg, bio, is_age_public, is_height_public, is_weight_public, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 1, datetime('now'), datetime('now'))",
-      [p.user_id, p.username, p.full_name, p.age, p.height_cm, p.weight_kg, p.bio]
+      "INSERT INTO profiles (user_id, username, full_name, date_of_birth, height_cm, weight_kg, bio, is_dob_public, is_height_public, is_weight_public, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, 1, datetime('now'), datetime('now'))",
+      [p.user_id, p.username, p.full_name, p.date_of_birth, p.height_cm, p.weight_kg, p.bio]
     );
   }
 
