@@ -29,7 +29,7 @@ async function setupDb() {
       weight_kg REAL,
       bio TEXT,
       profile_picture_url TEXT,
-      is_age_public INTEGER DEFAULT 0,
+      is_dob_public INTEGER DEFAULT 0,
       is_height_public INTEGER DEFAULT 0,
       is_weight_public INTEGER DEFAULT 0,
       created_at DATETIME NOT NULL,
