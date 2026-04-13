@@ -1,5 +1,6 @@
 const openDb = require("./connection");
 
+const bcrypt = require("bcrypt");
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -13,18 +14,20 @@ async function seed() {
   await db.exec("PRAGMA foreign_keys = ON;");
   console.log("Seeding database...");
 
-//FIXED USERS FOR TESTING 
-  const users = [
-    { email: "test1@example.com", password: "hashedpassword1" },
-    { email: "test2@example.com", password: "hashedpassword2" },
-  ];
+//FIXED USERS FOR TESTING
+const users = [
+  { email: "test1@example.com", password: "password123" },
+  { email: "test2@example.com", password: "password123" },
+];
 
-  for (const u of users) {
-    await db.run(
-      "INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))",
-      [u.email, u.password]
-    );
-  }
+for (const u of users) {
+  const hashedPassword = await bcrypt.hash(u.password, 10);
+
+  await db.run(
+    "INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))",
+    [u.email, hashedPassword]
+  );
+}
 
 //PROFILES
   const profiles = [
@@ -77,16 +80,25 @@ async function seed() {
 
 //STREAKS 
 for (const user_id of [1, 2]) {
-  const daysAgo = randomInt(0, 3);   const dateString = `-${daysAgo} day`; 
-  await db.run(
-    `INSERT INTO streaks 
-     (user_id, current_streak, longest_streak, last_activity_date, updated_at) 
-     VALUES (?, ?, ?, date('now', '${dateString}'), datetime('now'))`,
-    [user_id, randomInt(0, 5), randomInt(5, 10)]
-  );
-}
+    const daysAgo = randomInt(0, 3);
 
-  console.log("Database seeded successfully!");
+    const dateString = `-${daysAgo} day`;
+
+    await db.run(
+      `INSERT INTO streaks 
+       (user_id, current_streak, longest_streak, last_activity_date, updated_at) 
+       VALUES (?, ?, ?, date('now', ?), datetime('now'))`,
+      [
+        user_id,
+        randomInt(0, 5),
+        randomInt(5, 10),
+        dateString 
+      ]
+    );
+  }
+
+ console.log("Database seeded successfully!");
 }
+seed();
 
 seed();
