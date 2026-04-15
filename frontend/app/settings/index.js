@@ -1,3 +1,11 @@
+/*
+ * Settings screen.
+ *
+ * Holds preferences, integrations, profile editing, privacy, friend management,
+ * and account/data controls. These interactions currently update local state
+ * and display feedback. Backend wiring should hydrate this screen from profile,
+ * social, logs, integration, and auth APIs.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -10,10 +18,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import AppHeader from "../../components/ui/AppHeader";
-import BottomNav from "../../components/ui/BottomNav";
-import useMobileFrame from "../../hooks/useMobileFrame";
+import AppHeader from "../../src/shared/ui/AppHeader";
+import BottomNav from "../../src/shared/ui/BottomNav";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
+// Settings dropdown options are local UI choices until account management APIs exist.
+// Keep option labels stable if possible because the render helpers switch on them.
 const logManagementOptions = [
   "Delete old logs",
   "Edit logged goals",
@@ -26,7 +36,22 @@ const friendOptions = [
   "Refuse friend connection",
 ];
 
+const initialManagedLogs = [
+  // Demo rows for the settings management panels. Replace with logsApi data.
+  { id: "log-1", title: "Upper body workout", date: "Today", type: "Workout" },
+  { id: "log-2", title: "8,400 steps", date: "Yesterday", type: "Steps" },
+  { id: "log-3", title: "Sleep entry", date: "Mon", type: "Sleep" },
+];
+
+const initialFriendConnections = [
+  // Demo connections for the friend management panels. Replace with socialApi data.
+  { id: "friend-1", name: "Maya", username: "@maya.moves", status: "Friend" },
+  { id: "friend-2", name: "Rio", username: "@rio.run", status: "Friend" },
+  { id: "friend-3", name: "Sam", username: "@sam.strength", status: "Pending" },
+];
+
 function SegmentedControl({ label, options, value, onChange }) {
+  // Reusable two-option/toggle control used for units, integrations, and privacy.
   return (
     <View style={styles.settingGroup}>
       <Text style={styles.groupLabel}>{label}</Text>
@@ -140,29 +165,284 @@ export default function SettingsScreen() {
   const [isLogMenuOpen, setIsLogMenuOpen] = useState(false);
   const [isFriendMenuOpen, setIsFriendMenuOpen] = useState(false);
   const [hasProfilePhoto, setHasProfilePhoto] = useState(false);
+  const [managedLogs, setManagedLogs] = useState(initialManagedLogs);
+  const [friendConnections, setFriendConnections] = useState(
+    initialFriendConnections,
+  );
   const [profile, setProfile] = useState({
     username: "jhoom.user",
     email: "demo@jhoom.app",
     age: "",
   });
   const [privacy, setPrivacy] = useState("Friends only");
-  const [dataNotice, setDataNotice] = useState("");
+  const [settingsNotice, setSettingsNotice] = useState("");
 
   function handleSelectLogAction(option) {
     setLogAction(option);
     setIsLogMenuOpen(false);
+    setSettingsNotice(`${option} selected. Use the action panel below to continue.`);
   }
 
   function handleSelectFriendAction(option) {
     setFriendAction(option);
     setIsFriendMenuOpen(false);
+    setSettingsNotice(`${option} selected. Friend changes update this screen instantly.`);
+  }
+
+  function handleUnitChange(option) {
+    setUnitSystem(option);
+    setSettingsNotice(
+      `Units changed to ${option}. Logged health values will use this preference when backend sync is connected.`,
+    );
+  }
+
+  function handleIntegrationChange(option) {
+    // Selecting an integration does not connect health data yet. Real support
+    // should launch the correct permission/OAuth flow, then persist connection status.
+    setIntegration(option);
+    setSettingsNotice(
+      `${option} selected. The real connection flow can plug into this control later.`,
+    );
+  }
+
+  function handlePrivacyChange(option) {
+    setPrivacy(option);
+    setSettingsNotice(`Profile visibility changed to ${option}.`);
   }
 
   function handleProfileChange(field, value) {
+    // Profile edits stay local until updateMyProfile is connected.
     setProfile((current) => ({
       ...current,
       [field]: value,
     }));
+  }
+
+  function handleProfilePhotoToggle() {
+    setHasProfilePhoto((current) => {
+      const nextValue = !current;
+
+      setSettingsNotice(
+        nextValue
+          ? "Profile photo selected. Upload storage can be connected from this button later."
+          : "Profile photo selection removed.",
+      );
+
+      return nextValue;
+    });
+  }
+
+  function handleSaveProfile() {
+    const trimmedUsername = profile.username.trim();
+    const trimmedEmail = profile.email.trim();
+    const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
+
+    if (!trimmedUsername) {
+      setSettingsNotice("Please add a username before saving your profile.");
+      return;
+    }
+
+    if (!hasValidEmail) {
+      setSettingsNotice("Please enter a valid email address before saving.");
+      return;
+    }
+
+    setProfile((current) => ({
+      ...current,
+      username: trimmedUsername,
+      email: trimmedEmail,
+    }));
+    setSettingsNotice("Profile saved locally. This is ready to connect to your account API.");
+  }
+
+  function handleDeleteOldLogs() {
+    if (managedLogs.length === 0) {
+      setSettingsNotice("There are no saved sample logs left to delete.");
+      return;
+    }
+
+    setManagedLogs([]);
+    setSettingsNotice("Old logs removed from this frontend view.");
+  }
+
+  function handleExportWeeklyLogs() {
+    setSettingsNotice(
+      `Weekly export prepared for ${managedLogs.length} visible log${
+        managedLogs.length === 1 ? "" : "s"
+      }. Backend file generation can connect here.`,
+    );
+  }
+
+  function handleAcceptFriend(friendId) {
+    setFriendConnections((current) =>
+      current.map((friend) =>
+        friend.id === friendId ? { ...friend, status: "Friend" } : friend,
+      ),
+    );
+    setSettingsNotice("Friend request accepted.");
+  }
+
+  function handleRemoveFriend(friendId) {
+    setFriendConnections((current) =>
+      current.filter((friend) => friend.id !== friendId),
+    );
+    setSettingsNotice("Friend connection removed.");
+  }
+
+  function renderLogRows() {
+    if (managedLogs.length === 0) {
+      return <Text style={styles.emptyPanelText}>No logs are currently listed.</Text>;
+    }
+
+    return managedLogs.map((log) => (
+      <View key={log.id} style={styles.panelRow}>
+        <View style={styles.panelRowCopy}>
+          <Text style={styles.panelRowTitle}>{log.title}</Text>
+          <Text style={styles.panelRowMeta}>
+            {log.type} - {log.date}
+          </Text>
+        </View>
+      </View>
+    ));
+  }
+
+  function renderLogActionPanel() {
+    // The selected dropdown action controls which management panel appears.
+    // This keeps the UI compact while still giving each option a real action.
+    if (logAction === "Edit logged goals") {
+      return (
+        <View style={styles.actionPanel}>
+          <Text style={styles.panelTitle}>Logged goals</Text>
+          <Text style={styles.panelText}>
+            Goals live on the milestones screen so they stay linked with progress.
+          </Text>
+          <Pressable
+            onPress={() => router.push("/milestones")}
+            style={({ pressed }) => [
+              styles.panelButton,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.panelButtonText}>Open milestones</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (logAction === "Export weekly logs") {
+      return (
+        <View style={styles.actionPanel}>
+          <Text style={styles.panelTitle}>Weekly logs</Text>
+          <Text style={styles.panelText}>
+            Preview the logs that would be included before backend export files are generated.
+          </Text>
+          {renderLogRows()}
+          <Pressable
+            onPress={handleExportWeeklyLogs}
+            style={({ pressed }) => [
+              styles.panelButton,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text style={styles.panelButtonText}>Create export</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.actionPanel}>
+        <Text style={styles.panelTitle}>Old logs</Text>
+        <Text style={styles.panelText}>
+          Delete visible sample logs here. Real log deletion should call the logs API.
+        </Text>
+        {renderLogRows()}
+        <Pressable
+          onPress={handleDeleteOldLogs}
+          style={({ pressed }) => [
+            styles.panelButton,
+            styles.panelButtonDanger,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text style={[styles.panelButtonText, styles.panelButtonDangerText]}>
+            Delete listed logs
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  function renderFriendRows(filterStatus, actionLabel, onAction) {
+    const filteredFriends = friendConnections.filter(
+      (friend) => friend.status === filterStatus,
+    );
+
+    if (filteredFriends.length === 0) {
+      return (
+        <Text style={styles.emptyPanelText}>
+          No {filterStatus.toLowerCase()} connections right now.
+        </Text>
+      );
+    }
+
+    return filteredFriends.map((friend) => (
+      <View key={friend.id} style={styles.panelRow}>
+        <View style={styles.panelRowCopy}>
+          <Text style={styles.panelRowTitle}>{friend.name}</Text>
+          <Text style={styles.panelRowMeta}>{friend.username}</Text>
+        </View>
+        <Pressable
+          onPress={() => onAction(friend.id)}
+          style={({ pressed }) => [
+            styles.inlinePanelButton,
+            actionLabel === "Remove" && styles.inlineDangerButton,
+            pressed && styles.buttonPressed,
+          ]}
+        >
+          <Text
+            style={[
+              styles.inlinePanelButtonText,
+              actionLabel === "Remove" && styles.inlineDangerButtonText,
+            ]}
+          >
+            {actionLabel}
+          </Text>
+        </Pressable>
+      </View>
+    ));
+  }
+
+  function renderFriendActionPanel() {
+    // Friend management mirrors the settings wireframe: one dropdown chooses
+    // the action, then the panel below lets the user complete it.
+    if (friendAction === "Remove friend") {
+      return (
+        <View style={styles.actionPanel}>
+          <Text style={styles.panelTitle}>Friends</Text>
+          <Text style={styles.panelText}>Remove people from your active friend list.</Text>
+          {renderFriendRows("Friend", "Remove", handleRemoveFriend)}
+        </View>
+      );
+    }
+
+    if (friendAction === "Refuse friend connection") {
+      return (
+        <View style={styles.actionPanel}>
+          <Text style={styles.panelTitle}>Pending requests</Text>
+          <Text style={styles.panelText}>Refuse any incoming requests you do not want.</Text>
+          {renderFriendRows("Pending", "Refuse", handleRemoveFriend)}
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.actionPanel}>
+        <Text style={styles.panelTitle}>Friend requests</Text>
+        <Text style={styles.panelText}>Accept pending requests from this panel.</Text>
+        {renderFriendRows("Pending", "Accept", handleAcceptFriend)}
+      </View>
+    );
   }
 
   return (
@@ -208,14 +488,14 @@ export default function SettingsScreen() {
                   label="Units"
                   options={["Imperial", "Metric"]}
                   value={unitSystem}
-                  onChange={setUnitSystem}
+                  onChange={handleUnitChange}
                 />
 
                 <SegmentedControl
                   label="Integrations"
                   options={["Apple Health", "Google Fit"]}
                   value={integration}
-                  onChange={setIntegration}
+                  onChange={handleIntegrationChange}
                 />
 
                 <DropdownSetting
@@ -227,6 +507,7 @@ export default function SettingsScreen() {
                   onSelect={handleSelectLogAction}
                   helper="Select old logs or goals to manage"
                 />
+                {renderLogActionPanel()}
 
                 <DropdownSetting
                   label="Friends"
@@ -237,6 +518,11 @@ export default function SettingsScreen() {
                   onSelect={handleSelectFriendAction}
                   helper="Add, delete, or refuse connections"
                 />
+                {renderFriendActionPanel()}
+
+                {settingsNotice ? (
+                  <Text style={styles.statusNotice}>{settingsNotice}</Text>
+                ) : null}
               </View>
 
               <View style={[styles.profileCard, { width: cardWidth }]}>
@@ -278,7 +564,7 @@ export default function SettingsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Change profile photo"
-                  onPress={() => setHasProfilePhoto((current) => !current)}
+                  onPress={handleProfilePhotoToggle}
                   style={({ pressed }) => [
                     styles.uploadButton,
                     hasProfilePhoto && styles.uploadButtonActive,
@@ -298,6 +584,17 @@ export default function SettingsScreen() {
                 <Text style={styles.profileHelperText}>
                   Upload will connect to account storage later.
                 </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Save profile settings"
+                  onPress={handleSaveProfile}
+                  style={({ pressed }) => [
+                    styles.saveProfileButton,
+                    pressed && styles.buttonPressed,
+                  ]}
+                >
+                  <Text style={styles.saveProfileText}>Save profile</Text>
+                </Pressable>
               </View>
 
               <View style={[styles.settingsCard, { width: cardWidth }]}>
@@ -313,7 +610,7 @@ export default function SettingsScreen() {
                   label="Profile visibility"
                   options={["Friends only", "Private"]}
                   value={privacy}
-                  onChange={setPrivacy}
+                  onChange={handlePrivacyChange}
                 />
               </View>
 
@@ -329,7 +626,9 @@ export default function SettingsScreen() {
                 <View style={styles.dataActionGrid}>
                   <Pressable
                     onPress={() =>
-                      setDataNotice("Data export will be generated when backend storage is connected.")
+                      setSettingsNotice(
+                        "Data export will be generated when backend storage is connected.",
+                      )
                     }
                     style={({ pressed }) => [
                       styles.dataActionButton,
@@ -340,7 +639,9 @@ export default function SettingsScreen() {
                   </Pressable>
                   <Pressable
                     onPress={() =>
-                      setDataNotice("Account deletion will require confirmation once auth is connected.")
+                      setSettingsNotice(
+                        "Account deletion will require confirmation once auth is connected.",
+                      )
                     }
                     style={({ pressed }) => [
                       styles.dataActionButton,
@@ -353,10 +654,6 @@ export default function SettingsScreen() {
                     </Text>
                   </Pressable>
                 </View>
-
-                {dataNotice ? (
-                  <Text style={styles.dataNotice}>{dataNotice}</Text>
-                ) : null}
 
                 <Pressable
                   onPress={() => router.replace("/(auth)/login")}
@@ -539,6 +836,125 @@ const styles = StyleSheet.create({
   dropdownMenuTextSelected: {
     color: "#4EA955",
   },
+  actionPanel: {
+    marginTop: -6,
+    marginBottom: 18,
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    padding: 14,
+    gap: 10,
+  },
+  panelTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#111827",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  panelText: {
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#7A8699",
+  },
+  panelRow: {
+    minHeight: 48,
+    borderRadius: 18,
+    backgroundColor: "#F7F8FB",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  panelRowCopy: {
+    flex: 1,
+  },
+  panelRowTitle: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  panelRowMeta: {
+    marginTop: 3,
+    fontSize: 9,
+    lineHeight: 13,
+    fontWeight: "700",
+    color: "#7A8699",
+  },
+  emptyPanelText: {
+    borderRadius: 18,
+    backgroundColor: "#F7F8FB",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#7A8699",
+    textAlign: "center",
+  },
+  panelButton: {
+    minHeight: 40,
+    borderRadius: 999,
+    backgroundColor: "#4EA955",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+  },
+  panelButtonDanger: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  panelButtonText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    textTransform: "uppercase",
+    textAlign: "center",
+  },
+  panelButtonDangerText: {
+    color: "#991B1B",
+  },
+  inlinePanelButton: {
+    minHeight: 30,
+    borderRadius: 999,
+    backgroundColor: "#4EA955",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  inlineDangerButton: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  inlinePanelButtonText: {
+    fontSize: 9,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    textTransform: "uppercase",
+  },
+  inlineDangerButtonText: {
+    color: "#991B1B",
+  },
+  statusNotice: {
+    marginTop: 2,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: "700",
+    color: "#5E6B7F",
+    textAlign: "center",
+  },
   uploadButton: {
     width: 56,
     height: 56,
@@ -569,6 +985,21 @@ const styles = StyleSheet.create({
     color: "#7A8699",
     textAlign: "center",
   },
+  saveProfileButton: {
+    width: "100%",
+    minHeight: 42,
+    borderRadius: 999,
+    backgroundColor: "#4EA955",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 14,
+  },
+  saveProfileText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    textTransform: "uppercase",
+  },
   dataActionGrid: {
     flexDirection: "row",
     gap: 10,
@@ -597,20 +1028,6 @@ const styles = StyleSheet.create({
   },
   dangerActionText: {
     color: "#991B1B",
-  },
-  dataNotice: {
-    marginTop: 12,
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#DDF4E4",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 11,
-    lineHeight: 17,
-    fontWeight: "700",
-    color: "#5E6B7F",
-    textAlign: "center",
   },
   logoutButton: {
     minHeight: 42,

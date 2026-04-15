@@ -1,9 +1,16 @@
+/*
+ * Recommendations screen.
+ *
+ * Shows plan-derived suggestions in the same visual system as the rest of the
+ * app. It currently reuses the local health-plan sections. Once the backend AI
+ * endpoint exists, replace `getCurrentPlanSections` with `coachApi.getRecommendations`.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
-import AppHeader from "../../components/ui/AppHeader";
-import BottomNav from "../../components/ui/BottomNav";
-import useMobileFrame from "../../hooks/useMobileFrame";
-import { getCurrentPlanSections } from "../../lib/healthPlan";
+import AppHeader from "../../src/shared/ui/AppHeader";
+import BottomNav from "../../src/shared/ui/BottomNav";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { getCurrentPlanSections } from "../../src/features/health-plan/healthPlan";
 
 export default function RecommendationsScreen() {
   const {
@@ -15,6 +22,8 @@ export default function RecommendationsScreen() {
     shellMinHeight,
     cardWidth,
   } = useMobileFrame();
+  // Uses the same generated-plan sections as the AI coach until recommendation APIs exist.
+  // This keeps recommendations visible even before the AI backend is complete.
   const recommendations = getCurrentPlanSections();
 
   return (

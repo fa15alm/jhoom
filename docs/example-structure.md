@@ -5,27 +5,34 @@ jhoom/
 │  ├─ api-contract.md
 │  ├─ db-schema.md
 │  └─ meeting-notes.md
-├─ mobile/
+├─ frontend/
 │  ├─ app/
 │  │  ├─ (auth)/
-│  │  │  ├─ login.tsx
-│  │  │  └─ register.tsx
-│  │  ├─ (tabs)/
-│  │  │  ├─ feed.tsx
-│  │  │  ├─ profile.tsx
-│  │  │  └─ connections.tsx
+│  │  │  ├─ login.js
+│  │  │  └─ register.js
+│  │  ├─ (onboarding)/
+│  │  ├─ social/
+│  │  ├─ dashboard.js
+│  │  ├─ log.js
+│  │  ├─ milestones.js
+│  │  ├─ ai.js
 │  │  └─ _layout.tsx
 │  ├─ src/
-│  │  ├─ components/
 │  │  ├─ features/
 │  │  │  ├─ auth/
-│  │  │  ├─ profile/
-│  │  │  ├─ feed/
-│  │  │  └─ connections/
+│  │  │  ├─ dashboard/
+│  │  │  ├─ health-plan/
+│  │  │  ├─ logs/
+│  │  │  ├─ milestones/
+│  │  │  └─ social/
 │  │  ├─ services/
-│  │  ├─ hooks/
-│  │  ├─ utils/
-│  │  └─ types/
+│  │  │  └─ api/
+│  │  ├─ shared/
+│  │  │  ├─ hooks/
+│  │  │  ├─ types/
+│  │  │  └─ ui/
+│  │  ├─ store/
+│  │  └─ README.md
 │  ├─ package.json
 │  └─ app.json
 ├─ server/

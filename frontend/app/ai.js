@@ -1,3 +1,11 @@
+/*
+ * AI health coach screen.
+ *
+ * Shows the current plan above a chat-style question box. The chat currently
+ * creates a temporary local response so the interface is usable before AI
+ * backend work exists. Replace the timeout in `handleSendQuestion` with
+ * `coachApi.askHealthCoach` and include plan/log context in the request body.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -10,10 +18,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import AppHeader from "../components/ui/AppHeader";
-import BottomNav from "../components/ui/BottomNav";
-import useMobileFrame from "../hooks/useMobileFrame";
-import { getCurrentPlanSections, getPlanSummary } from "../lib/healthPlan";
+import AppHeader from "../src/shared/ui/AppHeader";
+import BottomNav from "../src/shared/ui/BottomNav";
+import useMobileFrame from "../src/shared/hooks/useMobileFrame";
+import { getCurrentPlanSections, getPlanSummary } from "../src/features/health-plan/healthPlan";
 
 const promptSuggestions = [
   "Adjust today",
@@ -23,6 +31,8 @@ const promptSuggestions = [
 ];
 
 const starterMessages = [
+  // Initial coach message gives the chat a friendly empty state.
+  // Backend chat history can replace this array once conversations are persisted.
   {
     id: "coach-welcome",
     role: "coach",
@@ -48,10 +58,14 @@ export default function AiScreen() {
   const planSummary = getPlanSummary();
 
   function handleSuggestionPress(suggestion) {
+    // Suggestion chips prefill the composer instead of sending immediately,
+    // giving the user a chance to edit the question first.
     setQuestion(suggestion);
   }
 
   function handleSendQuestion() {
+    // Simulates the request/response shape that coachApi.askHealthCoach will use later.
+    // Keep this shape similar to the backend payload to make the swap small.
     const trimmedQuestion = question.trim();
 
     if (!trimmedQuestion) {
@@ -72,6 +86,7 @@ export default function AiScreen() {
     setQuestion("");
 
     setTimeout(() => {
+      // Temporary response keeps the chat usable until the backend AI endpoint exists.
       setMessages((current) => [
         ...current,
         {

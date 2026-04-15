@@ -1,3 +1,11 @@
+/*
+ * Landing screen.
+ *
+ * This is the public entry point for the app. It explains what Jhoom does
+ * before the user has authenticated, then routes them to login or sign-up.
+ * The carousel copy is data-driven on purpose so the app overview can be
+ * changed without touching the layout code.
+ */
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -13,11 +21,13 @@ import {
   Text,
   View,
 } from "react-native";
-import useMobileFrame from "../hooks/useMobileFrame";
+import useMobileFrame from "../src/shared/hooks/useMobileFrame";
 
 const CARD_SPACING = 18;
 const SHIMMER_TRAVEL = 220;
 
+// Carousel content is intentionally data-driven so app overview copy is easy to edit.
+// Each object below becomes one swipeable card in the landing carousel.
 const slides = [
   {
     eyebrow: "App overview",
@@ -58,6 +68,9 @@ const slides = [
 ];
 
 function ActionButton({ href, label, variant = "primary", compact = false }) {
+  // This button handles navigation for landing-page CTAs.
+  // The primary version also owns its shimmer animation so the rest of the
+  // screen does not need to know about button animation details.
   const isPrimary = variant === "primary";
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
@@ -67,6 +80,7 @@ function ActionButton({ href, label, variant = "primary", compact = false }) {
       return undefined;
     }
 
+    // Primary buttons get the branded shimmer; secondary buttons stay static.
     const animation = Animated.loop(
       Animated.timing(shimmerX, {
         toValue: SHIMMER_TRAVEL,
@@ -137,6 +151,9 @@ function ActionButton({ href, label, variant = "primary", compact = false }) {
 }
 
 function FeatureCard({ item, cardWidth, compact, short }) {
+  // Greeting and feature cards share the same shell but use different typography.
+  // Keeping the renderer generic lets us add/remove overview cards by editing
+  // only the `slides` array above.
   const cardStyle = [
     styles.featureCard,
     item.kind === "greeting" && styles.greetingCard,
@@ -195,6 +212,7 @@ export default function LandingPage() {
   } = useMobileFrame();
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef(null);
+  // FlatList viewability gives us the active dot without manually tracking scroll offsets.
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
   }).current;

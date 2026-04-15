@@ -1,3 +1,11 @@
+/*
+ * Onboarding carousel.
+ *
+ * Collects the answers needed to generate a custom health plan. For now the
+ * answers are saved into the temporary frontend health-plan store. When the
+ * backend is connected, submit these answers to `healthPlanApi.generateHealthPlan`
+ * and store the generated plan returned by the server.
+ */
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -14,18 +22,20 @@ import {
   TextInput,
   View,
 } from "react-native";
-import useMobileFrame from "../../hooks/useMobileFrame";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 import {
-  buildPlanPreview,
   getDefaultOnboardingAnswers,
   saveOnboardingAnswers,
-} from "../../lib/healthPlan";
+} from "../../src/features/health-plan/healthPlan";
 
 const CARD_SPACING = 18;
 const SHIMMER_TRAVEL = 220;
 const ADDITIONAL_GOALS_LIMIT = 240;
 const LIMITATIONS_LIMIT = 180;
 
+// Each slide describes either an intro card, input card, choice card, or text card.
+// The carousel is intentionally config-driven so new onboarding questions can
+// be added without creating new route screens.
 const slides = [
   {
     eyebrow: "Personalised setup",
@@ -107,14 +117,11 @@ const slides = [
     maxLength: ADDITIONAL_GOALS_LIMIT,
     kind: "text-question",
   },
-  {
-    title: "Plan preview",
-    text: "Review the frontend plan summary before generating it.",
-    kind: "plan-preview",
-  },
 ];
 
 function ActionButton({ label, onPress, disabled = false, compact = false }) {
+  // The generate-plan button is disabled until the user reaches the final slide.
+  // That keeps the flow linear while still allowing swiping between questions.
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
 
   useEffect(() => {
@@ -123,6 +130,7 @@ function ActionButton({ label, onPress, disabled = false, compact = false }) {
       return undefined;
     }
 
+    // Disable shimmer until the user reaches the final valid onboarding slide.
     const animation = Animated.loop(
       Animated.timing(shimmerX, {
         toValue: SHIMMER_TRAVEL,
@@ -208,12 +216,13 @@ function FeatureCard({
   planDetails,
   onChangeBasicInfo,
   onChangePlanDetail,
-  planPreview,
-  missingRequiredFields,
   cardWidth,
   compact,
   short,
 }) {
+  // The renderer switches by slide kind so onboarding can grow without rewriting the carousel.
+  // New slide kinds should be added here, while the actual question data stays
+  // in the `slides` array above.
   const cardStyle = [
     styles.featureCard,
     styles.greetingCard,
@@ -330,36 +339,6 @@ function FeatureCard({
     );
   }
 
-  if (item.kind === "plan-preview") {
-    return (
-      <View style={cardStyle}>
-        <Text style={[styles.greetingTitle, compact && styles.compactGreetingTitle]}>
-          {item.title}
-        </Text>
-        <Text style={[styles.greetingText, compact && styles.compactBodyText]}>
-          {missingRequiredFields.length
-            ? "Complete the required setup cards so the AI plan has enough context."
-            : item.text}
-        </Text>
-
-        <View style={styles.previewList}>
-          {missingRequiredFields.length ? (
-            <Text style={styles.previewMissing}>
-              Missing: {missingRequiredFields.join(", ")}
-            </Text>
-          ) : (
-            planPreview.map((section) => (
-              <View key={section.title} style={styles.previewItem}>
-                <Text style={styles.previewTitle}>{section.title}</Text>
-                <Text style={styles.previewText}>{section.body}</Text>
-              </View>
-            ))
-          )}
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={cardStyle}>
       <Text style={[styles.featureEyebrow, compact && styles.compactEyebrow]}>
@@ -418,6 +397,7 @@ export default function OnboardingScreen() {
     ...planDetails,
   };
   const requiredFields = [
+    // These fields are the minimum needed before a generated plan makes sense.
     ["dateOfBirth", "date of birth"],
     ["height", "height"],
     ["weight", "weight"],
@@ -431,7 +411,6 @@ export default function OnboardingScreen() {
     .filter(([key]) => !planAnswers[key]?.trim())
     .map(([, label]) => label);
   const isOnboardingComplete = missingRequiredFields.length === 0;
-  const planPreview = buildPlanPreview(planAnswers);
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0 && viewableItems[0]?.index != null) {
       setActiveIndex(viewableItems[0].index);
@@ -457,6 +436,7 @@ export default function OnboardingScreen() {
       return;
     }
 
+    // Stored locally for now; this should become healthPlanApi.generateHealthPlan.
     saveOnboardingAnswers(planAnswers);
     router.replace("/dashboard");
   }
@@ -509,8 +489,6 @@ export default function OnboardingScreen() {
                     planDetails={planDetails}
                     onChangeBasicInfo={handleBasicInfoChange}
                     onChangePlanDetail={handlePlanDetailChange}
-                    planPreview={planPreview}
-                    missingRequiredFields={missingRequiredFields}
                     cardWidth={cardWidth}
                     compact={isCompactWidth}
                     short={isShortHeight}
@@ -680,45 +658,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#7A8699",
     textAlign: "right",
-  },
-  previewList: {
-    width: "100%",
-    gap: 10,
-    marginTop: 10,
-  },
-  previewItem: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#CFEFD9",
-    backgroundColor: "#F7F8FB",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  previewTitle: {
-    fontSize: 12,
-    fontWeight: "900",
-    color: "#4EA955",
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  previewText: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "700",
-    color: "#5E6B7F",
-  },
-  previewMissing: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    backgroundColor: "#FEF2F2",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: "800",
-    color: "#991B1B",
-    textAlign: "center",
   },
   optionList: {
     width: "100%",

@@ -1,3 +1,11 @@
+/*
+ * Social post detail screen.
+ *
+ * Displays one post with comments and simple reaction controls. The route uses
+ * the dynamic `[id]` segment so a feed card can deep-link to a specific post.
+ * Later, the post, comments, likes, and moderation state should be fetched from
+ * `socialApi` by this id.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams } from "expo-router";
 import { useState } from "react";
@@ -10,9 +18,9 @@ import {
   TextInput,
   View,
 } from "react-native";
-import AppHeader from "../../../components/ui/AppHeader";
-import BottomNav from "../../../components/ui/BottomNav";
-import useMobileFrame from "../../../hooks/useMobileFrame";
+import AppHeader from "../../../src/shared/ui/AppHeader";
+import BottomNav from "../../../src/shared/ui/BottomNav";
+import useMobileFrame from "../../../src/shared/hooks/useMobileFrame";
 
 export default function SocialPostScreen() {
   const { id } = useLocalSearchParams();
@@ -33,6 +41,8 @@ export default function SocialPostScreen() {
   const [liked, setLiked] = useState(false);
 
   function handleAddComment() {
+    // Mirrors the feed comment flow for a single-post detail route.
+    // Replace this local append with socialApi.addComment when persistence exists.
     const trimmedDraft = draft.trim();
 
     if (!trimmedDraft) {
@@ -47,6 +57,8 @@ export default function SocialPostScreen() {
   }
 
   function handleDeleteComment(commentId) {
+    // Local delete for comments authored by the current user.
+    // Backend permissions should decide who is allowed to delete which comments.
     setComments((current) => current.filter((comment) => comment.id !== commentId));
   }
 

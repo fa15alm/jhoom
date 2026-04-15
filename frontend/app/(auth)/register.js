@@ -1,3 +1,11 @@
+/*
+ * Sign-up screen.
+ *
+ * This screen collects the minimum account details needed before onboarding.
+ * It currently performs frontend validation only. Backend integration should
+ * replace the final route change in `handleCompleteSignUp` with a call to
+ * `authApi.registerUser`, then persist the returned session/user data.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
@@ -14,7 +22,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import useMobileFrame from "../../hooks/useMobileFrame";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
 const CARD_GAP = 18;
 const SHIMMER_TRAVEL = 220;
@@ -45,6 +53,7 @@ export default function RegisterScreen() {
   const [formError, setFormError] = useState("");
 
   useEffect(() => {
+    // Runs the same subtle shimmer used on the landing/auth primary buttons.
     const animation = Animated.loop(
       Animated.timing(shimmerX, {
         toValue: SHIMMER_TRAVEL,
@@ -63,6 +72,8 @@ export default function RegisterScreen() {
   }, [shimmerX]);
 
   function handleFieldChange(field, value) {
+    // Keep all registration fields in a single object so the payload shape
+    // will be easy to pass directly to the auth API later.
     setForm((current) => ({
       ...current,
       [field]: value,
@@ -73,6 +84,9 @@ export default function RegisterScreen() {
   }
 
   function handleCompleteSignUp() {
+    // Keep validation close to the submit handler so it mirrors backend requirements.
+    // The backend should enforce the same rules; frontend validation is only
+    // for fast user feedback.
     const username = form.username.trim();
     const email = form.email.trim();
     const password = form.password;
@@ -105,6 +119,7 @@ export default function RegisterScreen() {
     }
 
     setFormError("");
+    // Temporary success path. Replace with registerUser(...) before routing.
     router.replace("/(onboarding)/basic-info");
   }
 

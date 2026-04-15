@@ -1,3 +1,10 @@
+/*
+ * Friends management screen.
+ *
+ * A focused list view for accepting pending friends and removing existing
+ * connections. The main social feed has search/posting; this screen is a
+ * simpler management surface that can be fed by the same social API later.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import {
@@ -8,10 +15,12 @@ import {
   Text,
   View,
 } from "react-native";
-import AppHeader from "../../components/ui/AppHeader";
-import BottomNav from "../../components/ui/BottomNav";
-import useMobileFrame from "../../hooks/useMobileFrame";
+import AppHeader from "../../src/shared/ui/AppHeader";
+import BottomNav from "../../src/shared/ui/BottomNav";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
+// Local friend rows used until the friends endpoint owns this data.
+// Status values control which action buttons appear in the row.
 const starterFriends = [
   { id: "maya", name: "Maya", username: "maya.moves", status: "Added" },
   { id: "rio", name: "Rio", username: "rio.runs", status: "Added" },
@@ -31,10 +40,13 @@ export default function FriendsScreen() {
   const [friends, setFriends] = useState(starterFriends);
 
   function handleRemoveFriend(id) {
+    // Local remove action. Backend wiring should call socialApi.removeFriend.
     setFriends((current) => current.filter((friend) => friend.id !== id));
   }
 
   function handleApproveFriend(id) {
+    // Approving a pending friend updates only local state for now.
+    // A backend version should accept the request and refresh the friend list.
     setFriends((current) =>
       current.map((friend) =>
         friend.id === id ? { ...friend, status: "Added" } : friend,

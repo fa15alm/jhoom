@@ -1,3 +1,10 @@
+/*
+ * Root Expo Router stack.
+ *
+ * Every top-level route group/screen is registered here. Headers are hidden
+ * because the app uses custom mobile-first headers inside each screen instead
+ * of the native stack header.
+ */
 import { Stack } from "expo-router";
 
 export default function RootLayout() {

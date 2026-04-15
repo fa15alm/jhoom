@@ -1,3 +1,11 @@
+/*
+ * Login screen.
+ *
+ * The current version keeps authentication local so the app can be tested
+ * before backend auth is wired. When the backend is ready, `handleLogin`
+ * should call `authApi.loginUser`, store the returned token/session, then
+ * route to the dashboard on success.
+ */
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -13,10 +21,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import useMobileFrame from "../../hooks/useMobileFrame";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
 const CARD_GAP = 18;
 const SHIMMER_TRAVEL = 220;
+// Temporary credentials keep the UI testable until authApi.loginUser is connected.
+// Remove this constant once real auth replaces the frontend-only check.
 const MOCK_LOGIN = {
   email: "demo@jhoom.app",
   password: "password123",
@@ -45,6 +55,7 @@ export default function LoginScreen() {
   const [forgotNotice, setForgotNotice] = useState("");
 
   useEffect(() => {
+    // Reuses the landing-page shimmer motion for the primary login CTA.
     const animation = Animated.loop(
       Animated.timing(shimmerX, {
         toValue: SHIMMER_TRAVEL,
@@ -63,6 +74,7 @@ export default function LoginScreen() {
   }, [shimmerX]);
 
   function clearLoginError() {
+    // Clear any old feedback as soon as the user starts correcting the form.
     if (loginError) {
       setLoginError("");
     }
@@ -82,6 +94,10 @@ export default function LoginScreen() {
   }
 
   function handleLogin() {
+    // This handler mirrors the final backend flow:
+    // 1. validate the form,
+    // 2. submit credentials,
+    // 3. show an error or route into the app.
     const normalisedEmail = email.trim().toLowerCase();
 
     if (!normalisedEmail || !password) {
@@ -89,8 +105,7 @@ export default function LoginScreen() {
       return;
     }
 
-    // Frontend-only auth gate for now. Replace this with the real auth API
-    // response when backend authentication is connected.
+    // Frontend-only auth gate for now. Replace this branch with authApi.loginUser.
     const isAuthorised =
       normalisedEmail === MOCK_LOGIN.email && password === MOCK_LOGIN.password;
 

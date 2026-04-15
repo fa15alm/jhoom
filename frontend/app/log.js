@@ -1,3 +1,11 @@
+/*
+ * Log screen.
+ *
+ * Lets users create, edit, delete, and review daily health logs. The form is
+ * driven by `LOG_TYPES`, so adding a new metric type mostly means adding a new
+ * definition below. At backend time, replace the local `logs` state with
+ * `logsApi.getLogs/createLog/updateLog/deleteLog`.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import {
@@ -9,12 +17,14 @@ import {
   TextInput,
   View,
 } from "react-native";
-import AppHeader from "../components/ui/AppHeader";
-import BottomNav from "../components/ui/BottomNav";
-import useMobileFrame from "../hooks/useMobileFrame";
+import AppHeader from "../src/shared/ui/AppHeader";
+import BottomNav from "../src/shared/ui/BottomNav";
+import useMobileFrame from "../src/shared/hooks/useMobileFrame";
 
 const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+// Log type definitions drive the selector and the dynamic input fields below it.
+// Each type declares the fields that should appear in the editor card.
 const LOG_TYPES = [
   {
     key: "workout",
@@ -139,6 +149,7 @@ function formatMonthLabel(monthKey) {
 }
 
 function buildCalendarCells(monthKey) {
+  // Adds leading blanks so dates align correctly under a Monday-first calendar.
   const [year, month] = monthKey.split("-").map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
   const firstWeekday = (new Date(year, month - 1, 1).getDay() + 6) % 7;
@@ -188,6 +199,8 @@ function getLogType(typeKey) {
 }
 
 function createEmptyDraft(typeKey) {
+  // A draft mirrors the selected log type so the same editor can handle
+  // workouts, sleep, nutrition, steps, and calories burned without branching UI.
   const logType = getLogType(typeKey);
 
   return {
@@ -197,6 +210,7 @@ function createEmptyDraft(typeKey) {
 }
 
 function buildInitialLogs(dateKey) {
+  // Seed logs keep the history and edit flows visible before backend data exists.
   return [
     {
       id: "workout-1",
@@ -276,6 +290,9 @@ function formatHistoryValue(field, value) {
 }
 
 function buildHealthMetricRows(logs) {
+  // Flatten each saved log into individual metric rows for the daily summary card.
+  // This makes "all metrics for a date" easy to render even though logs are
+  // stored as mixed types with different fields.
   return logs.flatMap((entry) => {
     const type = getLogType(entry.typeKey);
 
@@ -334,7 +351,8 @@ export default function LogScreen() {
   const [isMetricCalendarOpen, setIsMetricCalendarOpen] = useState(false);
   const [calendarMonthKey, setCalendarMonthKey] = useState(getMonthKey(todayKey));
   // Replace this local state with persisted daily logs when backend storage
-  // and health integrations are connected.
+  // and health integrations are connected. The rest of the screen already uses
+  // normal create/update/delete handlers, so API calls can slot into those places.
   const [logs, setLogs] = useState(() => buildInitialLogs(todayKey));
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(() => createEmptyDraft(LOG_TYPES[0].key));
@@ -359,6 +377,7 @@ export default function LogScreen() {
     Object.values(draft.values).some((value) => value.trim().length > 0);
 
   function handleSelectType(typeKey) {
+    // Changing type resets edit mode because each log type owns a different field set.
     setSelectedTypeKey(typeKey);
     setDraft(createEmptyDraft(typeKey));
     setEditingId(null);
@@ -395,6 +414,8 @@ export default function LogScreen() {
   }
 
   function handleSave() {
+    // Prevent blank logs by requiring a name and at least one filled metric value.
+    // Backend validation should repeat this rule to protect the database too.
     const hasLogName = draft.name.trim().length > 0;
     const hasMetricValue = Object.values(draft.values).some(
       (value) => value.trim().length > 0,
@@ -427,6 +448,7 @@ export default function LogScreen() {
   }
 
   function handleEdit(entry) {
+    // Editing restores the selected type, log date, and field values into the form.
     setSelectedTypeKey(entry.typeKey);
     setDraft({
       name: entry.name,
@@ -444,6 +466,8 @@ export default function LogScreen() {
   }
 
   function handleDelete(id) {
+    // Local delete path. Replace the state update with logsApi.deleteLog and
+    // then refresh/remove the deleted row from state once the API confirms it.
     setLogs((current) => current.filter((entry) => entry.id !== id));
     setPendingDeleteId(null);
 
@@ -454,6 +478,7 @@ export default function LogScreen() {
   }
 
   function handleSelectLogDate(dateKey) {
+    // This date picker controls the date used for newly saved or edited logs.
     setSelectedLogDateKey(dateKey);
     setLogCalendarMonthKey(getMonthKey(dateKey));
     setIsLogCalendarOpen(false);

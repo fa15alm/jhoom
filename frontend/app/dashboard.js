@@ -1,3 +1,11 @@
+/*
+ * Dashboard screen.
+ *
+ * This is the main home screen after login. It presents current health metrics,
+ * weekly/monthly progress graphs, plan summary text, and the shared bottom nav.
+ * The screen currently uses a local dashboard source; backend wiring should
+ * replace that source with logs, health integrations, milestones, and the AI plan.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
@@ -10,16 +18,19 @@ import {
   Text,
   View,
 } from "react-native";
-import AppHeader from "../components/ui/AppHeader";
-import BottomNav from "../components/ui/BottomNav";
-import useMobileFrame from "../hooks/useMobileFrame";
-import { getPlanSummary } from "../lib/healthPlan";
+import AppHeader from "../src/shared/ui/AppHeader";
+import BottomNav from "../src/shared/ui/BottomNav";
+import useMobileFrame from "../src/shared/hooks/useMobileFrame";
+import { getPlanSummary } from "../src/features/health-plan/healthPlan";
 
 const BUTTON_GREEN = "#4EA955";
 const CARD_SPACING = 18;
 const GRAPH_HEIGHT = 220;
 const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+// Mock dashboard source. Backend log and health integration summaries should replace this.
+// Keep the shape stable when wiring the backend so the UI components below do
+// not need to change when real data arrives.
 const defaultDashboardSource = {
   streakCount: "1",
   caloriesBurned: "540 kcal",
@@ -99,8 +110,9 @@ function formatHoursValue(value) {
 
 function buildDashboardViewModel(dataSources = {}) {
   void dataSources;
-  // Hook real log/history sources in here later so all user-changing
-  // dashboard content is mapped in one place.
+  // Keep dashboard mapping in one place so future API data does not leak into UI components.
+  // Backend data should be normalised here into simple slide objects before it
+  // reaches the chart/card components.
   // Example future inputs:
   // - userLogs
   // - workoutPlan
@@ -196,6 +208,9 @@ function getCurrentWeekdayIndex() {
 }
 
 function buildProgressSeries(data, labels, key, currentIndex) {
+  // Future days stay empty so weekly charts visually fill as the week progresses.
+  // When connected to real logs, this same helper can keep incomplete future
+  // days from looking like missed targets.
   return labels.map((label, index) => {
     const matchingEntry = data.find((entry) => entry[key] === label);
 
@@ -212,6 +227,7 @@ function getWeekToDateSeries(data) {
 }
 
 function getCurrentMonthCalendarData(data) {
+  // Builds the monthly workout dot grid from a simple day/value series.
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth();
@@ -239,6 +255,8 @@ function getCurrentMonthCalendarData(data) {
 }
 
 function MetricsCard({ item, cardWidth, compact, onMetricPress }) {
+  // Metric tiles are pressable so they can deep-link to relevant log history later.
+  // For example, tapping Sleep can route to the log screen filtered to sleep logs.
   return (
     <View style={[styles.metricsCard, { width: cardWidth }]}>
       <View style={styles.metricsGrid}>
@@ -273,6 +291,7 @@ function MetricsCard({ item, cardWidth, compact, onMetricPress }) {
 }
 
 function TodayPlanCard({ cardWidth, planSummary, onOpenAi }) {
+  // Displays the compact health-plan summary above the dashboard carousel.
   return (
     <View style={[styles.todayPlanCard, { width: cardWidth }]}>
       <View style={styles.todayPlanHeader}>
@@ -326,6 +345,7 @@ function QuickActions({ cardWidth, onOpenLog, onOpenAi }) {
 }
 
 function WeeklyProgressChart({ item, cardWidth, graphWidth, compact }) {
+  // Rendered with positioned views to avoid pulling in a charting dependency.
   const formatValue = item.formatValue ?? ((value) => value.toString());
   const weekToDateData = getWeekToDateSeries(item.series);
   const maxValue = Math.max(

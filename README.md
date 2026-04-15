@@ -18,13 +18,14 @@ It aims to help users stay active by combining workout tracking with a social fe
 
 ## Tech Stack
 
-- Mobile app: React Native with Expo
+- Frontend app: React Native with Expo / Expo Router
 - Backend: Node.js with Express
 - Database: SQLite3
 
 ## Project Structure
 
-- `mobile/` – React Native (Expo) app **(WIP)**
+- `frontend/app/` – Expo Router route screens
+- `frontend/src/` – shared UI, hooks, feature logic, services, and future frontend stores
 - `server/` – Express server and SQLite database
 - `docs/` – Documentation (API reference, code style, etc.)
 
@@ -39,13 +40,14 @@ It aims to help users stay active by combining workout tracking with a social fe
    - `npm install`
    - `node src/server.js`
 
-3. Mobile app: **(WIP)**
-   - `cd mobile`
+3. Frontend app:
+   - `cd frontend`
    - `npm install`
    - `npx expo start`
 
 Check the `docs/` folder for:
 - `backend-api-reference.md` – API endpoints and request/response formats  
+- `frontend-backend-readiness.md` – frontend structure and backend wiring order
 - `code-style.md` – Coding standards for this project **(WIP)**
 
 ## Team Members

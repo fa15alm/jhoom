@@ -1,3 +1,11 @@
+/*
+ * Milestones screen.
+ *
+ * Lets users create goals and see whether they have been met. Progress is
+ * manual right now so the UI can be tested. Later, the backend should persist
+ * milestones and calculate progress from logs, health integrations, and AI
+ * plan targets.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRef, useState } from "react";
 import {
@@ -10,11 +18,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import AppHeader from "../components/ui/AppHeader";
-import BottomNav from "../components/ui/BottomNav";
-import useMobileFrame from "../hooks/useMobileFrame";
+import AppHeader from "../src/shared/ui/AppHeader";
+import BottomNav from "../src/shared/ui/BottomNav";
+import useMobileFrame from "../src/shared/hooks/useMobileFrame";
 
 const CARD_SPACING = 18;
+// Categories control both the add/edit chips and each milestone icon.
+// Add new categories here if the app supports new goal types later.
 const milestoneCategories = [
   { label: "Weight", icon: "scale-outline" },
   { label: "Steps", icon: "walk-outline" },
@@ -25,6 +35,7 @@ const milestoneCategories = [
 ];
 
 const starterMilestones = [
+  // Local seed data demonstrates both completed and in-progress goal states.
   {
     id: "weight-goal",
     title: "Weight goal reached",
@@ -64,6 +75,8 @@ const starterMilestones = [
 ];
 
 function GoalSlide({ item, cardWidth }) {
+  // One milestone becomes one swipeable carousel card.
+  // Keeping it separate from the screen makes the carousel easier to tune.
   return (
     <View style={[styles.goalSlide, { width: cardWidth }]}>
       <View style={styles.goalHeader}>
@@ -135,6 +148,9 @@ export default function MilestonesScreen() {
   }
 
   function handleSaveMilestone() {
+    // This single save handler covers both creating and editing milestones.
+    // A backend version should call createMilestone for new items and
+    // updateMilestone for existing items, then refresh local state from the response.
     const title = newMilestoneTitle.trim();
     const target = newMilestoneTarget.trim();
     const targetDate = newMilestoneDate.trim();
@@ -198,6 +214,8 @@ export default function MilestonesScreen() {
   }
 
   function handleToggleMilestone(id) {
+    // Manual toggle for now; backend log data can calculate progress automatically later.
+    // This gives the frontend a visible completed/in-progress interaction today.
     setMilestones((current) =>
       current.map((milestone) =>
         milestone.id === id

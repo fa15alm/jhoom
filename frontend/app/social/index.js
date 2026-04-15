@@ -1,3 +1,10 @@
+/*
+ * Social feed screen.
+ *
+ * Handles friend search, weekly feed posts, comments, likes, reporting, blocking,
+ * and composing a new weekly post. Data is local for now, but every action is
+ * already split into handlers so it can be replaced with `socialApi` calls.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRef, useState } from "react";
 import {
@@ -10,12 +17,14 @@ import {
   TextInput,
   View,
 } from "react-native";
-import AppHeader from "../../components/ui/AppHeader";
-import BottomNav from "../../components/ui/BottomNav";
-import useMobileFrame from "../../hooks/useMobileFrame";
+import AppHeader from "../../src/shared/ui/AppHeader";
+import BottomNav from "../../src/shared/ui/BottomNav";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
 const CARD_SPACING = 18;
 
+// Searchable starter users. Replace with socialApi.searchUsers when backend social exists.
+// The shape intentionally matches what the search endpoint should return.
 const FRIENDS = [
   {
     id: "maya",
@@ -46,6 +55,9 @@ function formatDateKey(date) {
 }
 
 function getCurrentWeekKey(date = new Date()) {
+  // Weekly feeds reset on Monday by comparing posts to this generated week key.
+  // Backend posts should store or derive the same week key so old feed content
+  // drops out consistently across devices.
   const weekStart = new Date(date);
   const daysSinceMonday = (weekStart.getDay() + 6) % 7;
   weekStart.setHours(0, 0, 0, 0);
@@ -55,6 +67,7 @@ function getCurrentWeekKey(date = new Date()) {
 }
 
 function buildStarterPosts(weekKey) {
+  // Local seed posts make the swipe feed interactive before the feed API is connected.
   return [
     {
       id: "post-maya-1",
@@ -107,6 +120,7 @@ export default function SocialScreen() {
   const [reportedPostIds, setReportedPostIds] = useState([]);
   const [profileVisibility, setProfileVisibility] = useState("Friends only");
   const [activeFeedIndex, setActiveFeedIndex] = useState(0);
+  // Track which swipe card is most visible so the pagination dots stay in sync.
   const feedViewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
   }).current;
@@ -117,6 +131,8 @@ export default function SocialScreen() {
   }).current;
 
   const filteredFriends = FRIENDS.filter((friend) => {
+    // Search is local now. Backend search should apply the same blocked-user
+    // filtering server-side so blocked people do not reappear.
     const query = searchQuery.trim().toLowerCase();
 
     if (blockedFriendIds.includes(friend.id)) {
@@ -142,6 +158,7 @@ export default function SocialScreen() {
   );
 
   function handleAddFriend(friendId) {
+    // Sends a local pending request. Backend wiring should call sendFriendRequest.
     setPendingFriendIds((current) =>
       current.includes(friendId) || addedFriendIds.includes(friendId)
         ? current
@@ -150,6 +167,8 @@ export default function SocialScreen() {
   }
 
   function handleApprovePendingFriend(friendId) {
+    // Local accept path used by the demo search results. A backend version
+    // should approve the request and then refresh the user's friend list.
     setPendingFriendIds((current) => current.filter((id) => id !== friendId));
     setAddedFriendIds((current) =>
       current.includes(friendId) ? current : [...current, friendId],
@@ -164,6 +183,7 @@ export default function SocialScreen() {
   }
 
   function handleAddComment(postId) {
+    // Adds comments locally now; later this should call socialApi.addComment.
     const draft = commentDrafts[postId]?.trim();
 
     if (!draft) {
@@ -206,6 +226,8 @@ export default function SocialScreen() {
   }
 
   function handleToggleLike(postId) {
+    // Toggle locally for immediate feedback. The backend should be the source
+    // of truth for final like counts and whether the user has liked a post.
     setLikedPostIds((current) =>
       current.includes(postId)
         ? current.filter((id) => id !== postId)
@@ -220,6 +242,8 @@ export default function SocialScreen() {
   }
 
   function handleBlockFriend(friendId) {
+    // Blocking removes the user from all local social views immediately.
+    // Backend blocking should also prevent future search/feed/comment visibility.
     setBlockedFriendIds((current) =>
       current.includes(friendId) ? current : [...current, friendId],
     );
@@ -228,6 +252,7 @@ export default function SocialScreen() {
   }
 
   function handleCreatePost() {
+    // Creates a local weekly post; media upload and persistence come from the backend later.
     const trimmedCaption = caption.trim();
 
     if (!trimmedCaption && !hasPhoto) {
