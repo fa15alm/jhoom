@@ -38,6 +38,21 @@ async function setupDb() {
     );
   `);
 
+  //health plan table
+  await db.exec(`
+  CREATE TABLE IF NOT EXISTS health_plans (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL,
+    answers_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_health_plans_user_id
+  ON health_plans(user_id);
+`);
+  
   // posts table 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS posts (
