@@ -83,6 +83,29 @@ async function setupDb() {
     );
   `);
 
+  //logs table
+  await db.exec(`
+  CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    date_key TEXT NOT NULL,
+    type_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    values_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+`);
+
+  await db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_logs_user_date
+  ON logs(user_id, date_key);
+
+  CREATE INDEX IF NOT EXISTS idx_logs_user_type
+  ON logs(user_id, type_key);
+`);
+  
   // streaks table 
   await db.exec(`
     CREATE TABLE IF NOT EXISTS streaks (
@@ -95,9 +118,12 @@ async function setupDb() {
       FOREIGN KEY(user_id) REFERENCES users(id)
     );
   `);
-
+  
   console.log("Jhoom database setup complete. All tables created.");
+  await db.close();
 }
 
-// run script
-setupDb();
+// run script safely
+setupDb().catch((err) => {
+  console.error("Error setting up database:", err);
+});
