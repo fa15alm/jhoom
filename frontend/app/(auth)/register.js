@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
+import { Link, useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -35,6 +35,14 @@ export default function RegisterScreen() {
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
   const formWidth = sliderWidth - CARD_GAP * 2;
+  const [form, setForm] = useState({
+    username: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -53,6 +61,52 @@ export default function RegisterScreen() {
       shimmerX.setValue(-SHIMMER_TRAVEL);
     };
   }, [shimmerX]);
+
+  function handleFieldChange(field, value) {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    if (formError) {
+      setFormError("");
+    }
+  }
+
+  function handleCompleteSignUp() {
+    const username = form.username.trim();
+    const email = form.email.trim();
+    const password = form.password;
+    const confirmPassword = form.confirmPassword;
+    const isEmailValid = /\S+@\S+\.\S+/.test(email);
+
+    if (!username || !email || !password || !confirmPassword) {
+      setFormError("Fill in every field to complete sign up.");
+      return;
+    }
+
+    if (!isEmailValid) {
+      setFormError("Enter a valid email address.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setFormError("Password needs to be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setFormError("Passwords do not match.");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setFormError("Agree to the terms and privacy policy to continue.");
+      return;
+    }
+
+    setFormError("");
+    router.replace("/(onboarding)/basic-info");
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -100,6 +154,8 @@ export default function RegisterScreen() {
                     <View style={[styles.fieldGroup, { width: formWidth }]}>
                       <Text style={styles.label}>Username</Text>
                       <TextInput
+                        value={form.username}
+                        onChangeText={(value) => handleFieldChange("username", value)}
                         placeholder="Enter your Username"
                         placeholderTextColor="#5E6B7F"
                         style={styles.input}
@@ -110,22 +166,77 @@ export default function RegisterScreen() {
                     <View style={[styles.fieldGroup, { width: formWidth }]}>
                       <Text style={styles.label}>Email</Text>
                       <TextInput
+                        value={form.email}
+                        onChangeText={(value) => handleFieldChange("email", value)}
                         placeholder="Enter your Email"
                         placeholderTextColor="#5E6B7F"
                         style={styles.input}
                         autoCapitalize="none"
+                        keyboardType="email-address"
+                        autoComplete="email"
+                        textContentType="emailAddress"
                       />
                     </View>
 
                     <View style={[styles.fieldGroup, { width: formWidth }]}>
                       <Text style={styles.label}>Password</Text>
                       <TextInput
+                        value={form.password}
+                        onChangeText={(value) => handleFieldChange("password", value)}
                         placeholder="Create a password"
                         placeholderTextColor="#5E6B7F"
                         style={styles.input}
                         secureTextEntry
+                        autoComplete="new-password"
+                        textContentType="newPassword"
                       />
                     </View>
+
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Confirm password</Text>
+                      <TextInput
+                        value={form.confirmPassword}
+                        onChangeText={(value) => handleFieldChange("confirmPassword", value)}
+                        placeholder="Confirm your password"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        secureTextEntry
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                      />
+                    </View>
+
+                    <Pressable
+                      onPress={() => {
+                        setAcceptedTerms((current) => !current);
+                        setFormError("");
+                      }}
+                      style={({ pressed }) => [
+                        styles.termsRow,
+                        { width: formWidth },
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          acceptedTerms && styles.checkboxSelected,
+                        ]}
+                      >
+                        {acceptedTerms ? (
+                          <Ionicons name="checkmark-outline" size={14} color="#FFFFFF" />
+                        ) : null}
+                      </View>
+                      <Text style={styles.termsText}>
+                        I agree to the terms and privacy policy.
+                      </Text>
+                    </Pressable>
+
+                    {formError ? (
+                      <Text accessibilityRole="alert" style={styles.errorText}>
+                        {formError}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               </View>
@@ -140,7 +251,7 @@ export default function RegisterScreen() {
               </Pressable>
 
               <Pressable
-                onPress={() => router.replace("/(onboarding)/basic-info")}
+                onPress={handleCompleteSignUp}
                 style={({ pressed }) => [
                   styles.submitButton,
                   { width: formWidth },
@@ -176,6 +287,10 @@ export default function RegisterScreen() {
                   Complete sign up
                 </Text>
               </Pressable>
+
+              <Link href="/(auth)/login" style={styles.loginLink}>
+                Already have an account? Log in
+              </Link>
             </View>
           </View>
         </View>
@@ -257,6 +372,50 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#111827",
   },
+  termsRow: {
+    minHeight: 44,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    backgroundColor: "#F4FFF7",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#A8C995",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxSelected: {
+    backgroundColor: "#4EA955",
+    borderColor: "#4EA955",
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#62716A",
+  },
+  errorText: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#991B1B",
+    textAlign: "center",
+  },
   uploadSection: {
     alignItems: "center",
     marginBottom: 20,
@@ -322,6 +481,12 @@ const styles = StyleSheet.create({
   },
   compactSubmitText: {
     fontSize: 14,
+  },
+  loginLink: {
+    marginTop: 14,
+    fontSize: 11,
+    color: "#62716A",
+    textTransform: "uppercase",
   },
   buttonPressed: {
     opacity: 0.92,

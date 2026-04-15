@@ -3,7 +3,6 @@ import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
   FlatList,
-  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -11,8 +10,10 @@ import {
   Text,
   View,
 } from "react-native";
+import AppHeader from "../components/ui/AppHeader";
 import BottomNav from "../components/ui/BottomNav";
 import useMobileFrame from "../hooks/useMobileFrame";
+import { getPlanSummary } from "../lib/healthPlan";
 
 const BUTTON_GREEN = "#4EA955";
 const CARD_SPACING = 18;
@@ -237,29 +238,16 @@ function getCurrentMonthCalendarData(data) {
   return { monthLabel, cells };
 }
 
-function HeaderIconButton({ icon, onPress, accessibilityLabel }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.headerButton,
-        pressed && styles.headerButtonPressed,
-      ]}
-    >
-      <Ionicons name={icon} size={18} color="#FFFFFF" />
-    </Pressable>
-  );
-}
-
-function MetricsCard({ item, cardWidth, compact }) {
+function MetricsCard({ item, cardWidth, compact, onMetricPress }) {
   return (
     <View style={[styles.metricsCard, { width: cardWidth }]}>
       <View style={styles.metricsGrid}>
         {item.metrics.map((metric) => (
           <Pressable
             key={metric.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${metric.label}`}
+            onPress={() => onMetricPress(metric)}
             style={({ pressed }) => [
               styles.metricTile,
               pressed && styles.metricTilePressed,
@@ -276,9 +264,63 @@ function MetricsCard({ item, cardWidth, compact }) {
                 {metric.value}
               </Text>
             ) : null}
+            <Text style={styles.metricUpdated}>From logs</Text>
           </Pressable>
         ))}
       </View>
+    </View>
+  );
+}
+
+function TodayPlanCard({ cardWidth, planSummary, onOpenAi }) {
+  return (
+    <View style={[styles.todayPlanCard, { width: cardWidth }]}>
+      <View style={styles.todayPlanHeader}>
+        <View>
+          <Text style={styles.todayPlanEyebrow}>Today&apos;s plan</Text>
+          <Text style={styles.todayPlanTitle}>{planSummary.title}</Text>
+        </View>
+        <Ionicons name="sparkles-outline" size={22} color="#4EA955" />
+      </View>
+      <Text style={styles.todayPlanText}>{planSummary.detail}</Text>
+      <Text style={styles.todayPlanMeta}>
+        Last updated from onboarding and daily logs.
+      </Text>
+      <Pressable
+        onPress={onOpenAi}
+        style={({ pressed }) => [
+          styles.todayPlanButton,
+          pressed && styles.metricTilePressed,
+        ]}
+      >
+        <Text style={styles.todayPlanButtonText}>Ask AI coach</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function QuickActions({ cardWidth, onOpenLog, onOpenAi }) {
+  const actions = [
+    { label: "Log workout", icon: "barbell-outline", onPress: onOpenLog },
+    { label: "Log sleep", icon: "moon-outline", onPress: onOpenLog },
+    { label: "Ask AI", icon: "sparkles-outline", onPress: onOpenAi },
+  ];
+
+  return (
+    <View style={[styles.quickActionsCard, { width: cardWidth }]}>
+      {actions.map((action) => (
+        <Pressable
+          key={action.label}
+          onPress={action.onPress}
+          style={({ pressed }) => [
+            styles.quickActionButton,
+            pressed && styles.metricTilePressed,
+          ]}
+        >
+          <Ionicons name={action.icon} size={16} color="#4EA955" />
+          <Text style={styles.quickActionText}>{action.label}</Text>
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -510,6 +552,7 @@ function MonthlyWorkoutCalendarCard({ item, cardWidth, compact }) {
 }
 
 export default function DashboardScreen() {
+  const router = useRouter();
   const {
     isCompactWidth,
     isShortHeight,
@@ -521,10 +564,10 @@ export default function DashboardScreen() {
     sliderWidth,
     cardWidth,
   } = useMobileFrame();
-  const router = useRouter();
   const [activeMetricIndex, setActiveMetricIndex] = useState(0);
   const metricsListRef = useRef(null);
   const dashboardView = buildDashboardViewModel();
+  const planSummary = getPlanSummary();
   const graphWidth = Math.max(cardWidth - 36, 220);
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
@@ -535,6 +578,10 @@ export default function DashboardScreen() {
       setActiveMetricIndex(viewableItems[0].index);
     }
   }).current;
+
+  function handleMetricPress() {
+    router.push("/log");
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -563,32 +610,29 @@ export default function DashboardScreen() {
               },
             ]}
           >
-            <View style={[styles.topRow, isShortHeight && styles.compactTopRow]}>
-              <View style={styles.leftGroup}>
-                <HeaderIconButton
-                  icon="person-outline"
-                  accessibilityLabel="Open settings"
-                  onPress={() => router.push("/settings")}
-                />
-
+            <AppHeader
+              title="DASHBOARD."
+              leftAccessory={(
                 <View style={styles.streakBadge}>
                   <Ionicons name="flame-outline" size={16} color="#4EA955" />
                   <Text style={styles.streakValue}>{dashboardView.streakCount}</Text>
                 </View>
-              </View>
-
-              <View pointerEvents="none" style={styles.titleWrap}>
-                <Text style={styles.title}>DASHBOARD.</Text>
-              </View>
-
-              <HeaderIconButton
-                icon="people-outline"
-                accessibilityLabel="Open social"
-                onPress={() => router.push("/social")}
-              />
-            </View>
+              )}
+            />
 
             <View style={styles.carouselSection}>
+              <TodayPlanCard
+                cardWidth={cardWidth}
+                planSummary={planSummary}
+                onOpenAi={() => router.push("/ai")}
+              />
+
+              <QuickActions
+                cardWidth={cardWidth}
+                onOpenLog={() => router.push("/log")}
+                onOpenAi={() => router.push("/ai")}
+              />
+
               <FlatList
                 ref={metricsListRef}
                 data={dashboardView.slides}
@@ -635,6 +679,7 @@ export default function DashboardScreen() {
                       item={item}
                       cardWidth={cardWidth}
                       compact={isCompactWidth}
+                      onMetricPress={handleMetricPress}
                     />
                   );
                 }}
@@ -676,82 +721,110 @@ const styles = StyleSheet.create({
   },
   inner: {
     flexGrow: 1,
-    borderRadius: 38,
-    backgroundColor: "#F7F8FB",
-  },
-  topRow: {
-    position: "relative",
-    flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    minHeight: 40,
-    paddingTop: 8,
-    marginBottom: 28,
-  },
-  compactTopRow: {
-    marginBottom: 22,
-  },
-  leftGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  titleWrap: {
-    position: "absolute",
-    top: 8,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: BUTTON_GREEN,
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "rgba(78, 169, 85, 0.28)",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 1,
-    shadowRadius: 18,
-    elevation: 4,
-  },
-  headerButtonPressed: {
-    opacity: 0.92,
-    transform: [{ scale: 0.98 }],
   },
   streakBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    minHeight: 32,
+    borderRadius: 999,
+    backgroundColor: "#F4FFF7",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    paddingHorizontal: 10,
   },
   streakValue: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#111827",
-  },
-  title: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#111827",
-    letterSpacing: 0.1,
-    fontFamily: Platform.select({
-      ios: "Georgia",
-      android: "serif",
-      default: "serif",
-    }),
-    textShadowColor: "rgba(78, 169, 85, 0.65)",
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 18,
   },
   carouselSection: {
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-start",
     paddingTop: 6,
-    paddingBottom: 2,
+    paddingBottom: 28,
+    gap: 14,
+  },
+  todayPlanCard: {
+    borderRadius: 28,
+    backgroundColor: "#ECFDF3",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    padding: 18,
+  },
+  todayPlanHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 8,
+  },
+  todayPlanEyebrow: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#83B66E",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+    marginBottom: 4,
+  },
+  todayPlanTitle: {
+    fontSize: 15,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  todayPlanText: {
+    fontSize: 12,
+    lineHeight: 19,
+    fontWeight: "700",
+    color: "#5E6B7F",
+    marginBottom: 8,
+  },
+  todayPlanMeta: {
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "800",
+    color: "#83B66E",
+    textTransform: "uppercase",
+    marginBottom: 12,
+  },
+  todayPlanButton: {
+    alignSelf: "flex-start",
+    minHeight: 34,
+    borderRadius: 999,
+    backgroundColor: "#4EA955",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  todayPlanButtonText: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#FFFFFF",
+    textTransform: "uppercase",
+  },
+  quickActionsCard: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quickActionButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  quickActionText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#111827",
+    textTransform: "uppercase",
   },
   sliderList: {
     flexGrow: 0,
@@ -761,7 +834,13 @@ const styles = StyleSheet.create({
   },
   metricsCard: {
     marginHorizontal: CARD_SPACING,
-    minHeight: 510,
+    height: 510,
+    borderRadius: 30,
+    backgroundColor: "#ECFDF3",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    paddingHorizontal: 18,
+    paddingVertical: 20,
   },
   chartCard: {
     marginHorizontal: CARD_SPACING,
@@ -777,47 +856,50 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 18,
     gap: 12,
   },
   chartTitle: {
-    fontSize: 24,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "800",
     color: "#111827",
     flex: 1,
+    letterSpacing: 0.2,
   },
   compactChartTitle: {
-    fontSize: 21,
+    fontSize: 15,
   },
   chartHeaderSpacer: {
     width: 78,
     height: 1,
   },
   targetBadge: {
-    borderRadius: 16,
-    backgroundColor: "#DCFCE7",
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#BBF7D0",
+    borderColor: "#DDF4E4",
     paddingHorizontal: 12,
     paddingVertical: 8,
     alignItems: "center",
   },
   targetBadgeLabel: {
     fontSize: 10,
-    fontWeight: "600",
-    color: "#5E6B7F",
+    fontWeight: "900",
+    color: "#83B66E",
     textTransform: "uppercase",
+    letterSpacing: 0.6,
     marginBottom: 2,
   },
   targetBadgeValue: {
     fontSize: 12,
-    fontWeight: "700",
-    color: "#166534",
+    fontWeight: "800",
+    color: "#111827",
   },
   calendarMonthLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#5E6B7F",
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#83B66E",
+    letterSpacing: 0.7,
     textTransform: "uppercase",
   },
   graphWrapper: {
@@ -832,8 +914,8 @@ const styles = StyleSheet.create({
   },
   barValue: {
     fontSize: 10,
-    fontWeight: "600",
-    color: "#166534",
+    fontWeight: "900",
+    color: "#83B66E",
     textAlign: "center",
   },
   graphBaseline: {
@@ -843,7 +925,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: 2,
     borderRadius: 999,
-    backgroundColor: "#D7DEE8",
+    backgroundColor: "#CFEFD9",
   },
   targetLine: {
     position: "absolute",
@@ -874,7 +956,7 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF",
   },
   graphPointFuture: {
-    backgroundColor: "#D7DEE8",
+    backgroundColor: "#CFEFD9",
   },
   futureValueSpacer: {
     height: 12,
@@ -915,7 +997,7 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 10,
     borderRadius: 18,
-    backgroundColor: "#D7DEE8",
+    backgroundColor: "#CFEFD9",
     opacity: 0.55,
   },
   sleepBarValue: {
@@ -924,17 +1006,18 @@ const styles = StyleSheet.create({
     transform: [{ translateX: -14 }],
     width: 28,
     fontSize: 10,
-    fontWeight: "600",
-    color: "#166534",
+    fontWeight: "900",
+    color: "#83B66E",
     textAlign: "center",
   },
   sleepBarLabel: {
     textAlign: "center",
   },
   barLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#5E6B7F",
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#7A8699",
+    textTransform: "uppercase",
   },
   barLabelFuture: {
     color: "#AAB4C3",
@@ -950,8 +1033,9 @@ const styles = StyleSheet.create({
   calendarWeekday: {
     flex: 1,
     fontSize: 10,
-    fontWeight: "700",
-    color: "#5E6B7F",
+    fontWeight: "900",
+    color: "#83B66E",
+    letterSpacing: 0.6,
     textAlign: "center",
     textTransform: "uppercase",
   },
@@ -968,9 +1052,9 @@ const styles = StyleSheet.create({
     width: "14.2857%",
     aspectRatio: 1,
     borderRadius: 16,
-    backgroundColor: "#F7F8FB",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#DDEBE0",
+    borderColor: "#DDF4E4",
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 8,
@@ -980,7 +1064,7 @@ const styles = StyleSheet.create({
   },
   calendarDayText: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#111827",
     marginBottom: 8,
   },
@@ -992,7 +1076,7 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 999,
     borderWidth: 1.5,
-    borderColor: "#BFD9C6",
+    borderColor: "#CFEFD9",
     backgroundColor: "transparent",
   },
   calendarWorkoutDotFilled: {
@@ -1013,9 +1097,9 @@ const styles = StyleSheet.create({
     width: "48%",
     height: "31%",
     borderRadius: 24,
-    backgroundColor: "#ECFDF3",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#CFEFD9",
+    borderColor: "#DDF4E4",
     paddingHorizontal: 12,
     paddingVertical: 14,
     justifyContent: "center",
@@ -1025,15 +1109,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   metricTilePressed: {
-    opacity: 0.92,
+    opacity: 0.9,
     transform: [{ scale: 0.98 }],
   },
   metricLabel: {
     fontSize: 10,
-    fontWeight: "600",
-    color: "#5E6B7F",
+    fontWeight: "900",
+    color: "#83B66E",
     textAlign: "center",
     textTransform: "uppercase",
+    letterSpacing: 0.6,
     lineHeight: 13,
   },
   compactMetricLabel: {
@@ -1041,20 +1126,28 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
   metricValue: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 12,
+    fontWeight: "800",
     color: "#111827",
     textAlign: "center",
     marginTop: 6,
   },
   compactMetricValue: {
-    fontSize: 14,
+    fontSize: 12,
+  },
+  metricUpdated: {
+    marginTop: 5,
+    fontSize: 8,
+    fontWeight: "900",
+    color: "#A8C995",
+    textTransform: "uppercase",
   },
   dotsRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 18,
+    marginTop: 10,
+    marginBottom: 10,
   },
   dot: {
     width: 8,

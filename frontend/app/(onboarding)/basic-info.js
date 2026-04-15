@@ -15,10 +15,16 @@ import {
   View,
 } from "react-native";
 import useMobileFrame from "../../hooks/useMobileFrame";
+import {
+  buildPlanPreview,
+  getDefaultOnboardingAnswers,
+  saveOnboardingAnswers,
+} from "../../lib/healthPlan";
 
 const CARD_SPACING = 18;
 const SHIMMER_TRAVEL = 220;
 const ADDITIONAL_GOALS_LIMIT = 240;
+const LIMITATIONS_LIMIT = 180;
 
 const slides = [
   {
@@ -51,11 +57,60 @@ const slides = [
     kind: "question",
   },
   {
+    title: "Personal details",
+    text: "Optional, but useful for safer plan estimates.",
+    options: ["Female", "Male", "Non-binary", "Prefer not to say"],
+    stateKey: "sex",
+    kind: "question",
+  },
+  {
+    title: "Training days",
+    text: "How often can you realistically train?",
+    options: ["2 days per week", "3 days per week", "4 days per week", "5+ days per week"],
+    stateKey: "trainingDays",
+    kind: "question",
+  },
+  {
+    title: "Equipment access",
+    text: "This shapes the workout plan.",
+    options: ["Home only", "Gym access", "Bodyweight", "Mixed access"],
+    stateKey: "equipment",
+    kind: "question",
+  },
+  {
+    title: "Injuries or limits?",
+    text: "Share anything the AI should avoid or adapt around.",
+    placeholder: "Knee pain, lower back issues, shoulder injury, medical limits...",
+    stateKey: "limitations",
+    maxLength: LIMITATIONS_LIMIT,
+    kind: "text-question",
+  },
+  {
+    title: "Diet preference",
+    text: "This helps shape meal suggestions.",
+    options: ["Balanced", "Vegetarian", "Vegan", "High protein", "No preference"],
+    stateKey: "dietaryPreference",
+    kind: "question",
+  },
+  {
+    title: "Sleep goal",
+    text: "Set a realistic recovery target.",
+    options: ["6-7 hours", "7-8 hours", "8+ hours", "Improve consistency"],
+    stateKey: "sleepGoal",
+    kind: "question",
+  },
+  {
     title: "Any other health goals?",
     text: "Share any extra overall health goals you want the AI to consider.",
     placeholder: "Better sleep, more energy, healthier routine, improved recovery...",
     stateKey: "additionalGoals",
+    maxLength: ADDITIONAL_GOALS_LIMIT,
     kind: "text-question",
+  },
+  {
+    title: "Plan preview",
+    text: "Review the frontend plan summary before generating it.",
+    kind: "plan-preview",
   },
 ];
 
@@ -153,6 +208,8 @@ function FeatureCard({
   planDetails,
   onChangeBasicInfo,
   onChangePlanDetail,
+  planPreview,
+  missingRequiredFields,
   cardWidth,
   compact,
   short,
@@ -162,7 +219,7 @@ function FeatureCard({
     styles.greetingCard,
     {
       width: cardWidth,
-      minHeight: short ? 280 : 314,
+      minHeight: short ? 300 : 340,
       paddingHorizontal: compact ? 18 : 24,
       paddingVertical: compact ? 22 : 28,
     },
@@ -262,12 +319,42 @@ function FeatureCard({
             placeholderTextColor="#7A8699"
             style={[styles.basicInfoInput, styles.goalsInput]}
             multiline
-            maxLength={ADDITIONAL_GOALS_LIMIT}
+            maxLength={item.maxLength}
             textAlignVertical="top"
           />
           <Text style={styles.characterCount}>
-            {planDetails[item.stateKey].length}/{ADDITIONAL_GOALS_LIMIT}
+            {planDetails[item.stateKey].length}/{item.maxLength}
           </Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (item.kind === "plan-preview") {
+    return (
+      <View style={cardStyle}>
+        <Text style={[styles.greetingTitle, compact && styles.compactGreetingTitle]}>
+          {item.title}
+        </Text>
+        <Text style={[styles.greetingText, compact && styles.compactBodyText]}>
+          {missingRequiredFields.length
+            ? "Complete the required setup cards so the AI plan has enough context."
+            : item.text}
+        </Text>
+
+        <View style={styles.previewList}>
+          {missingRequiredFields.length ? (
+            <Text style={styles.previewMissing}>
+              Missing: {missingRequiredFields.join(", ")}
+            </Text>
+          ) : (
+            planPreview.map((section) => (
+              <View key={section.title} style={styles.previewItem}>
+                <Text style={styles.previewTitle}>{section.title}</Text>
+                <Text style={styles.previewText}>{section.body}</Text>
+              </View>
+            ))
+          )}
         </View>
       </View>
     );
@@ -304,21 +391,47 @@ export default function OnboardingScreen() {
   } = useMobileFrame();
   const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
+  const defaultAnswers = getDefaultOnboardingAnswers();
   const [basicInfo, setBasicInfo] = useState({
-    dateOfBirth: "",
-    height: "",
-    weight: "",
+    dateOfBirth: defaultAnswers.dateOfBirth,
+    height: defaultAnswers.height,
+    weight: defaultAnswers.weight,
   });
   const [planDetails, setPlanDetails] = useState({
-    goal: "",
-    activityLevel: "",
-    additionalGoals: "",
+    goal: defaultAnswers.goal,
+    activityLevel: defaultAnswers.activityLevel,
+    sex: defaultAnswers.sex,
+    trainingDays: defaultAnswers.trainingDays,
+    equipment: defaultAnswers.equipment,
+    limitations: defaultAnswers.limitations,
+    dietaryPreference: defaultAnswers.dietaryPreference,
+    sleepGoal: defaultAnswers.sleepGoal,
+    additionalGoals: defaultAnswers.additionalGoals,
   });
   const listRef = useRef(null);
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
   }).current;
   const isLastSlide = activeIndex === slides.length - 1;
+  const planAnswers = {
+    ...basicInfo,
+    ...planDetails,
+  };
+  const requiredFields = [
+    ["dateOfBirth", "date of birth"],
+    ["height", "height"],
+    ["weight", "weight"],
+    ["goal", "goal"],
+    ["activityLevel", "activity level"],
+    ["trainingDays", "training days"],
+    ["equipment", "equipment"],
+    ["sleepGoal", "sleep goal"],
+  ];
+  const missingRequiredFields = requiredFields
+    .filter(([key]) => !planAnswers[key]?.trim())
+    .map(([, label]) => label);
+  const isOnboardingComplete = missingRequiredFields.length === 0;
+  const planPreview = buildPlanPreview(planAnswers);
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0 && viewableItems[0]?.index != null) {
       setActiveIndex(viewableItems[0].index);
@@ -337,6 +450,15 @@ export default function OnboardingScreen() {
       ...current,
       [field]: value,
     }));
+  }
+
+  function handleGeneratePlan() {
+    if (!isOnboardingComplete) {
+      return;
+    }
+
+    saveOnboardingAnswers(planAnswers);
+    router.replace("/dashboard");
   }
 
   return (
@@ -387,6 +509,8 @@ export default function OnboardingScreen() {
                     planDetails={planDetails}
                     onChangeBasicInfo={handleBasicInfoChange}
                     onChangePlanDetail={handlePlanDetailChange}
+                    planPreview={planPreview}
+                    missingRequiredFields={missingRequiredFields}
                     cardWidth={cardWidth}
                     compact={isCompactWidth}
                     short={isShortHeight}
@@ -409,8 +533,8 @@ export default function OnboardingScreen() {
             <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
               <ActionButton
                 label="Generate custom plan"
-                disabled={!isLastSlide}
-                onPress={() => router.replace("/dashboard")}
+                disabled={!isLastSlide || !isOnboardingComplete}
+                onPress={handleGeneratePlan}
                 compact={isCompactWidth}
               />
             </View>
@@ -556,6 +680,45 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#7A8699",
     textAlign: "right",
+  },
+  previewList: {
+    width: "100%",
+    gap: 10,
+    marginTop: 10,
+  },
+  previewItem: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    backgroundColor: "#F7F8FB",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  previewTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#4EA955",
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  previewText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: "#5E6B7F",
+  },
+  previewMissing: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: "#991B1B",
+    textAlign: "center",
   },
   optionList: {
     width: "100%",

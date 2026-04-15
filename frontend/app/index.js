@@ -20,27 +20,39 @@ const SHIMMER_TRAVEL = 220;
 
 const slides = [
   {
-    eyebrow: "Welcome",
-    title: "Start your health journey with Jhoom",
-    text: "Track the essentials, stay consistent, and keep your routine simple from one mobile-first dashboard with AI Built in.",
+    eyebrow: "App overview",
+    title: "Your health plan, logs, progress, and coach in one place",
+    text: "Jhoom helps you set up a custom plan, track daily health metrics, follow progress, hit milestones, and get AI guidance from a mobile-first dashboard.",
     kind: "greeting",
   },
   {
-    eyebrow: "Workout tracking",
-    title: "Log sessions and build momentum",
-    text: "Record workouts quickly and see your weekly effort without digging through multiple screens.",
+    eyebrow: "Dashboard",
+    title: "See your week at a glance",
+    text: "View calories burned, sleep time, steps, workouts, streaks, and upcoming plan focus from one clean dashboard.",
     kind: "feature",
   },
   {
-    eyebrow: "Nutrition overview",
-    title: "Keep meals and calories in check",
-    text: "Stay on top of your food intake with a clear summary designed for fast mobile check-ins.",
+    eyebrow: "Daily logging",
+    title: "Log what matters each day",
+    text: "Add workouts, cardio, nutrition, calories burned, sleep, and steps, then return to previous days to edit your logs.",
     kind: "feature",
   },
   {
-    eyebrow: "Progress feedback",
-    title: "Watch habits turn into results",
-    text: "See streaks, milestones, and simple progress signals that keep you moving forward each week.",
+    eyebrow: "AI health coach",
+    title: "Generate and adjust your plan",
+    text: "Answer onboarding questions to build a custom plan, then ask the AI coach for guidance around training, recovery, and routine changes.",
+    kind: "feature",
+  },
+  {
+    eyebrow: "Milestones and social",
+    title: "Stay accountable as you improve",
+    text: "Set milestones, see what you have reached, share weekly updates, and follow friends for extra motivation.",
+    kind: "feature",
+  },
+  {
+    eyebrow: "Privacy",
+    title: "Your health data stays personal",
+    text: "Profile details, logs, integrations, and social sharing should always be controlled by you. Backend privacy controls will connect here later.",
     kind: "feature",
   },
 ];

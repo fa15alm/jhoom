@@ -1,10 +1,12 @@
 import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import useMobileFrame from "../../hooks/useMobileFrame";
+import AppHeader from "./AppHeader";
 
 export default function PlaceholderScreen({
   title,
   text,
   footer = null,
+  headerTitle = null,
 }) {
   const {
     shellPaddingHorizontal,
@@ -38,6 +40,8 @@ export default function PlaceholderScreen({
               },
             ]}
           >
+            {headerTitle ? <AppHeader title={headerTitle} /> : null}
+
             <View style={styles.content}>
               <Text style={styles.title}>{title}</Text>
               <Text style={styles.text}>{text}</Text>

@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -17,6 +17,10 @@ import useMobileFrame from "../../hooks/useMobileFrame";
 
 const CARD_GAP = 18;
 const SHIMMER_TRAVEL = 220;
+const MOCK_LOGIN = {
+  email: "demo@jhoom.app",
+  password: "password123",
+};
 
 export default function LoginScreen() {
   const {
@@ -34,6 +38,11 @@ export default function LoginScreen() {
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
   const formWidth = sliderWidth - CARD_GAP * 2;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [forgotNotice, setForgotNotice] = useState("");
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -53,12 +62,59 @@ export default function LoginScreen() {
     };
   }, [shimmerX]);
 
+  function clearLoginError() {
+    if (loginError) {
+      setLoginError("");
+    }
+    if (forgotNotice) {
+      setForgotNotice("");
+    }
+  }
+
+  function handleEmailChange(value) {
+    setEmail(value);
+    clearLoginError();
+  }
+
+  function handlePasswordChange(value) {
+    setPassword(value);
+    clearLoginError();
+  }
+
+  function handleLogin() {
+    const normalisedEmail = email.trim().toLowerCase();
+
+    if (!normalisedEmail || !password) {
+      setLoginError("Enter your email and password.");
+      return;
+    }
+
+    // Frontend-only auth gate for now. Replace this with the real auth API
+    // response when backend authentication is connected.
+    const isAuthorised =
+      normalisedEmail === MOCK_LOGIN.email && password === MOCK_LOGIN.password;
+
+    if (!isAuthorised) {
+      setLoginError("The details were incorrect.");
+      return;
+    }
+
+    setLoginError("");
+    router.replace("/dashboard");
+  }
+
+  function handleForgotPassword() {
+    setLoginError("");
+    setForgotNotice("Password reset will be connected when authentication is live.");
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         bounces={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View
           style={[
@@ -99,23 +155,59 @@ export default function LoginScreen() {
                     <View style={[styles.fieldGroup, { width: formWidth }]}>
                       <Text style={styles.label}>Email</Text>
                       <TextInput
+                        value={email}
+                        onChangeText={handleEmailChange}
                         placeholder="Enter your email"
                         placeholderTextColor="#5E6B7F"
                         style={styles.input}
                         keyboardType="email-address"
                         autoCapitalize="none"
+                        autoComplete="email"
+                        textContentType="emailAddress"
                       />
                     </View>
 
                     <View style={[styles.fieldGroup, { width: formWidth }]}>
                       <Text style={styles.label}>Password</Text>
-                      <TextInput
-                        placeholder="Enter your password"
-                        placeholderTextColor="#5E6B7F"
-                        style={styles.input}
-                        secureTextEntry
-                      />
+                      <View style={styles.passwordWrap}>
+                        <TextInput
+                          value={password}
+                          onChangeText={handlePasswordChange}
+                          placeholder="Enter your password"
+                          placeholderTextColor="#5E6B7F"
+                          style={[styles.input, styles.passwordInput]}
+                          secureTextEntry={!showPassword}
+                          autoComplete="password"
+                          textContentType="password"
+                          onSubmitEditing={handleLogin}
+                        />
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            showPassword ? "Hide password" : "Show password"
+                          }
+                          onPress={() => setShowPassword((current) => !current)}
+                          style={({ pressed }) => [
+                            styles.passwordToggle,
+                            pressed && styles.buttonPressed,
+                          ]}
+                        >
+                          <Text style={styles.passwordToggleText}>
+                            {showPassword ? "Hide" : "Show"}
+                          </Text>
+                        </Pressable>
+                      </View>
                     </View>
+
+                    {loginError ? (
+                      <Text accessibilityRole="alert" style={styles.errorText}>
+                        {loginError}
+                      </Text>
+                    ) : null}
+
+                    {forgotNotice ? (
+                      <Text style={styles.noticeText}>{forgotNotice}</Text>
+                    ) : null}
                   </View>
                 </View>
               </View>
@@ -126,8 +218,12 @@ export default function LoginScreen() {
                 Need an account? Sign up
               </Link>
 
+              <Pressable onPress={handleForgotPassword} style={styles.forgotButton}>
+                <Text style={styles.forgotText}>Forgot password?</Text>
+              </Pressable>
+
               <Pressable
-                onPress={() => router.replace("/dashboard")}
+                onPress={handleLogin}
                 style={({ pressed }) => [
                   styles.submitButton,
                   { width: formWidth },
@@ -244,6 +340,57 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#111827",
   },
+  passwordWrap: {
+    position: "relative",
+    justifyContent: "center",
+  },
+  passwordInput: {
+    paddingRight: 76,
+  },
+  passwordToggle: {
+    position: "absolute",
+    right: 8,
+    height: 36,
+    minWidth: 56,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+  },
+  passwordToggleText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#4EA955",
+    textTransform: "uppercase",
+  },
+  errorText: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#991B1B",
+    textAlign: "center",
+  },
+  noticeText: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    backgroundColor: "#F4FFF7",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#4EA955",
+    textAlign: "center",
+  },
   bottomSection: {
     flex: 1,
     justifyContent: "center",
@@ -257,9 +404,18 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   helperLink: {
-    marginBottom: 20,
+    marginBottom: 10,
     fontSize: 11,
     color: "#62716A",
+    textTransform: "uppercase",
+  },
+  forgotButton: {
+    marginBottom: 20,
+  },
+  forgotText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#4EA955",
     textTransform: "uppercase",
   },
   submitButton: {
