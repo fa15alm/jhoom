@@ -32,15 +32,14 @@ export default function FoodLogScreen() {
         <Text style={styles.text}>
           This is where users will log meals, calories, and nutrition.
         </Text> 
-  //display logs from backend 
-  {logs.map((log) => (
+  {/* display logs from backend */}
+        {logs.map((log) => (
           <View key={log.id} style={{ marginTop: 10 }}>
             <Text>{log.name}</Text>
             <Text>{log.typeKey}</Text>
             <Text>{log.dateKey}</Text>
           </View>
-        ))}
-          
+        ))}  
       </View>
     </SafeAreaView>
   );
