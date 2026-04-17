@@ -1,30 +1,61 @@
+/*
+ * Login screen.
+ *
+ * The current version keeps authentication local so the app can be tested
+ * before backend auth is wired. When the backend is ready, `handleLogin`
+ * should call `authApi.loginUser`, store the returned token/session, then
+ * route to the dashboard on success.
+ */
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Dimensions,
   Easing,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
-const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 72;
 const CARD_GAP = 18;
-const FORM_WIDTH = CARD_WIDTH - CARD_GAP * 2;
 const SHIMMER_TRAVEL = 220;
+// Temporary credentials keep the UI testable until authApi.loginUser is connected.
+// Remove this constant once real auth replaces the frontend-only check.
+const MOCK_LOGIN = {
+  email: "demo@jhoom.app",
+  password: "password123",
+};
 
 export default function LoginScreen() {
+  const {
+    isCompactWidth,
+    isShortHeight,
+    shellPaddingHorizontal,
+    shellPaddingVertical,
+    innerPaddingHorizontal,
+    innerPaddingTop,
+    innerPaddingBottom,
+    shellMinHeight,
+    sliderWidth,
+    wordmarkSize,
+  } = useMobileFrame();
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
+  const formWidth = sliderWidth - CARD_GAP * 2;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [forgotNotice, setForgotNotice] = useState("");
 
   useEffect(() => {
+    // Reuses the landing-page shimmer motion for the primary login CTA.
     const animation = Animated.loop(
       Animated.timing(shimmerX, {
         toValue: SHIMMER_TRAVEL,
@@ -42,85 +73,211 @@ export default function LoginScreen() {
     };
   }, [shimmerX]);
 
+  function clearLoginError() {
+    // Clear any old feedback as soon as the user starts correcting the form.
+    if (loginError) {
+      setLoginError("");
+    }
+    if (forgotNotice) {
+      setForgotNotice("");
+    }
+  }
+
+  function handleEmailChange(value) {
+    setEmail(value);
+    clearLoginError();
+  }
+
+  function handlePasswordChange(value) {
+    setPassword(value);
+    clearLoginError();
+  }
+
+  function handleLogin() {
+    // This handler mirrors the final backend flow:
+    // 1. validate the form,
+    // 2. submit credentials,
+    // 3. show an error or route into the app.
+    const normalisedEmail = email.trim().toLowerCase();
+
+    if (!normalisedEmail || !password) {
+      setLoginError("Enter your email and password.");
+      return;
+    }
+
+    // Frontend-only auth gate for now. Replace this branch with authApi.loginUser.
+    const isAuthorised =
+      normalisedEmail === MOCK_LOGIN.email && password === MOCK_LOGIN.password;
+
+    if (!isAuthorised) {
+      setLoginError("The details were incorrect.");
+      return;
+    }
+
+    setLoginError("");
+    router.replace("/dashboard");
+  }
+
+  function handleForgotPassword() {
+    setLoginError("");
+    setForgotNotice("Password reset will be connected when authentication is live.");
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.outerShell}>
-        <View style={styles.inner}>
-          <View style={styles.headerSection}>
-            <Text style={styles.wordmark}>Jhoom.</Text>
-          </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View
+          style={[
+            styles.outerShell,
+            {
+              paddingHorizontal: shellPaddingHorizontal,
+              paddingVertical: shellPaddingVertical,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.inner,
+              {
+                minHeight: shellMinHeight,
+                paddingHorizontal: innerPaddingHorizontal,
+                paddingTop: innerPaddingTop,
+                paddingBottom: innerPaddingBottom,
+              },
+            ]}
+          >
+            <View style={[styles.headerSection, isShortHeight && styles.compactHeaderSection]}>
+              <Text style={[styles.wordmark, { fontSize: wordmarkSize }]}>Jhoom.</Text>
+            </View>
 
-          <View style={styles.contentSection}>
-            <View style={styles.contentStack}>
-              <View style={styles.formAnchor}>
-                <View style={styles.formSection}>
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Email</Text>
-                    <TextInput
-                      placeholder="Enter your email"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                    />
-                  </View>
+            <View style={styles.contentSection}>
+              <View
+                style={[
+                  styles.contentStack,
+                  {
+                    width: formWidth,
+                    minHeight: isShortHeight ? 180 : 220,
+                  },
+                ]}
+              >
+                <View style={[styles.formAnchor, { width: formWidth }]}>
+                  <View style={styles.formSection}>
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Email</Text>
+                      <TextInput
+                        value={email}
+                        onChangeText={handleEmailChange}
+                        placeholder="Enter your email"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        autoComplete="email"
+                        textContentType="emailAddress"
+                      />
+                    </View>
 
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Password</Text>
-                    <TextInput
-                      placeholder="Enter your password"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      secureTextEntry
-                    />
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Password</Text>
+                      <View style={styles.passwordWrap}>
+                        <TextInput
+                          value={password}
+                          onChangeText={handlePasswordChange}
+                          placeholder="Enter your password"
+                          placeholderTextColor="#5E6B7F"
+                          style={[styles.input, styles.passwordInput]}
+                          secureTextEntry={!showPassword}
+                          autoComplete="password"
+                          textContentType="password"
+                          onSubmitEditing={handleLogin}
+                        />
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={
+                            showPassword ? "Hide password" : "Show password"
+                          }
+                          onPress={() => setShowPassword((current) => !current)}
+                          style={({ pressed }) => [
+                            styles.passwordToggle,
+                            pressed && styles.buttonPressed,
+                          ]}
+                        >
+                          <Text style={styles.passwordToggleText}>
+                            {showPassword ? "Hide" : "Show"}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    {loginError ? (
+                      <Text accessibilityRole="alert" style={styles.errorText}>
+                        {loginError}
+                      </Text>
+                    ) : null}
+
+                    {forgotNotice ? (
+                      <Text style={styles.noticeText}>{forgotNotice}</Text>
+                    ) : null}
                   </View>
                 </View>
               </View>
             </View>
-          </View>
 
-          <View style={styles.bottomSection}>
-            <Link href="/(auth)/register" style={styles.helperLink}>
-              Need an account? Sign up
-            </Link>
+            <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
+              <Link href="/(auth)/register" style={styles.helperLink}>
+                Need an account? Sign up
+              </Link>
 
-            <Pressable
-              onPress={() => router.replace("/(onboarding)/welcome")}
-              style={({ pressed }) => [
-                styles.submitButton,
-                pressed && styles.buttonPressed,
-              ]}
-            >
-              <View pointerEvents="none" style={styles.submitBackground}>
-                <LinearGradient
-                  colors={["#5FBE67", "#4EA955", "#469A4D"]}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={styles.submitGradient}
-                />
-                <Animated.View
-                  style={[
-                    styles.shimmerWrap,
-                    { transform: [{ translateX: shimmerX }] },
-                  ]}
-                >
+              <Pressable onPress={handleForgotPassword} style={styles.forgotButton}>
+                <Text style={styles.forgotText}>Forgot password?</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={handleLogin}
+                style={({ pressed }) => [
+                  styles.submitButton,
+                  { width: formWidth },
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View pointerEvents="none" style={styles.submitBackground}>
                   <LinearGradient
-                    colors={[
-                      "rgba(255,255,255,0)",
-                      "rgba(255,255,255,0.26)",
-                      "rgba(255,255,255,0)",
-                    ]}
+                    colors={["#5FBE67", "#4EA955", "#469A4D"]}
                     start={{ x: 0, y: 0.5 }}
                     end={{ x: 1, y: 0.5 }}
-                    style={styles.shimmer}
+                    style={styles.submitGradient}
                   />
-                </Animated.View>
-              </View>
-              <Text style={styles.submitText}>Log in</Text>
-            </Pressable>
+                  <Animated.View
+                    style={[
+                      styles.shimmerWrap,
+                      { transform: [{ translateX: shimmerX }] },
+                    ]}
+                  >
+                    <LinearGradient
+                      colors={[
+                        "rgba(255,255,255,0)",
+                        "rgba(255,255,255,0.26)",
+                        "rgba(255,255,255,0)",
+                      ]}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmer}
+                    />
+                  </Animated.View>
+                </View>
+                <Text style={[styles.submitText, isCompactWidth && styles.compactSubmitText]}>
+                  Log in
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -130,26 +287,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F7F8FB",
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   outerShell: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 18,
+    flexGrow: 1,
   },
   inner: {
-    flex: 1,
+    flexGrow: 1,
     borderRadius: 38,
     backgroundColor: "#F7F8FB",
-    paddingHorizontal: 20,
-    paddingTop: 34,
-    paddingBottom: 26,
   },
   headerSection: {
     alignItems: "center",
     paddingTop: 42,
     marginBottom: 28,
   },
+  compactHeaderSection: {
+    paddingTop: 24,
+    marginBottom: 22,
+  },
   wordmark: {
-    fontSize: 52,
     fontWeight: "600",
     color: "#111827",
     letterSpacing: 0.1,
@@ -164,25 +322,21 @@ const styles = StyleSheet.create({
   },
   contentSection: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: "flex-start",
     alignItems: "center",
   },
   contentStack: {
-    width: FORM_WIDTH,
-    minHeight: 314,
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
     alignItems: "center",
   },
   formAnchor: {
-    width: FORM_WIDTH,
-    justifyContent: "flex-end",
+    justifyContent: "flex-start",
   },
   formSection: {
     gap: 16,
     alignItems: "center",
   },
   fieldGroup: {
-    width: FORM_WIDTH,
     gap: 8,
   },
   label: {
@@ -201,6 +355,57 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#111827",
   },
+  passwordWrap: {
+    position: "relative",
+    justifyContent: "center",
+  },
+  passwordInput: {
+    paddingRight: 76,
+  },
+  passwordToggle: {
+    position: "absolute",
+    right: 8,
+    height: 36,
+    minWidth: 56,
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+  },
+  passwordToggleText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#4EA955",
+    textTransform: "uppercase",
+  },
+  errorText: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#991B1B",
+    textAlign: "center",
+  },
+  noticeText: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    backgroundColor: "#F4FFF7",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#4EA955",
+    textAlign: "center",
+  },
   bottomSection: {
     flex: 1,
     justifyContent: "center",
@@ -209,14 +414,26 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     width: "100%",
   },
+  compactBottomSection: {
+    paddingHorizontal: 0,
+    paddingBottom: 8,
+  },
   helperLink: {
-    marginBottom: 20,
+    marginBottom: 10,
     fontSize: 11,
     color: "#62716A",
     textTransform: "uppercase",
   },
+  forgotButton: {
+    marginBottom: 20,
+  },
+  forgotText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#4EA955",
+    textTransform: "uppercase",
+  },
   submitButton: {
-    width: FORM_WIDTH,
     height: 54,
     borderRadius: 999,
     justifyContent: "center",
@@ -248,6 +465,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
     zIndex: 1,
+  },
+  compactSubmitText: {
+    fontSize: 14,
   },
   buttonPressed: {
     opacity: 0.92,

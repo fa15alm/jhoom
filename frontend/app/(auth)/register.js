@@ -1,31 +1,59 @@
+/*
+ * Sign-up screen.
+ *
+ * This screen collects the minimum account details needed before onboarding.
+ * It currently performs frontend validation only. Backend integration should
+ * replace the final route change in `handleCompleteSignUp` with a call to
+ * `authApi.registerUser`, then persist the returned session/user data.
+ */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
-import { useEffect, useRef } from "react";
+import { Link, useRouter } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
-  Dimensions,
   Easing,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 
-const { width } = Dimensions.get("window");
-const CARD_WIDTH = width - 72;
 const CARD_GAP = 18;
-const FORM_WIDTH = CARD_WIDTH - CARD_GAP * 2;
 const SHIMMER_TRAVEL = 220;
 
 export default function RegisterScreen() {
+  const {
+    isCompactWidth,
+    isShortHeight,
+    shellPaddingHorizontal,
+    shellPaddingVertical,
+    innerPaddingHorizontal,
+    innerPaddingTop,
+    innerPaddingBottom,
+    shellMinHeight,
+    sliderWidth,
+    wordmarkSize,
+  } = useMobileFrame();
   const router = useRouter();
   const shimmerX = useRef(new Animated.Value(-SHIMMER_TRAVEL)).current;
+  const formWidth = sliderWidth - CARD_GAP * 2;
+  const [form, setForm] = useState({
+    username: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
+    // Runs the same subtle shimmer used on the landing/auth primary buttons.
     const animation = Animated.loop(
       Animated.timing(shimmerX, {
         toValue: SHIMMER_TRAVEL,
@@ -43,97 +71,245 @@ export default function RegisterScreen() {
     };
   }, [shimmerX]);
 
+  function handleFieldChange(field, value) {
+    // Keep all registration fields in a single object so the payload shape
+    // will be easy to pass directly to the auth API later.
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    if (formError) {
+      setFormError("");
+    }
+  }
+
+  function handleCompleteSignUp() {
+    // Keep validation close to the submit handler so it mirrors backend requirements.
+    // The backend should enforce the same rules; frontend validation is only
+    // for fast user feedback.
+    const username = form.username.trim();
+    const email = form.email.trim();
+    const password = form.password;
+    const confirmPassword = form.confirmPassword;
+    const isEmailValid = /\S+@\S+\.\S+/.test(email);
+
+    if (!username || !email || !password || !confirmPassword) {
+      setFormError("Fill in every field to complete sign up.");
+      return;
+    }
+
+    if (!isEmailValid) {
+      setFormError("Enter a valid email address.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setFormError("Password needs to be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setFormError("Passwords do not match.");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setFormError("Agree to the terms and privacy policy to continue.");
+      return;
+    }
+
+    setFormError("");
+    // Temporary success path. Replace with registerUser(...) before routing.
+    router.replace("/(onboarding)/basic-info");
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.outerShell}>
-        <View style={styles.inner}>
-          <View style={styles.headerSection}>
-            <Text style={styles.wordmark}>Jhoom.</Text>
-          </View>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        bounces={false}
+      >
+        <View
+          style={[
+            styles.outerShell,
+            {
+              paddingHorizontal: shellPaddingHorizontal,
+              paddingVertical: shellPaddingVertical,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.inner,
+              {
+                minHeight: Math.max(shellMinHeight, 700),
+                paddingHorizontal: innerPaddingHorizontal,
+                paddingTop: innerPaddingTop,
+                paddingBottom: innerPaddingBottom,
+              },
+            ]}
+          >
+            <View style={[styles.headerSection, isShortHeight && styles.compactHeaderSection]}>
+              <Text style={[styles.wordmark, { fontSize: wordmarkSize }]}>Jhoom.</Text>
+            </View>
 
-          <View style={styles.contentSection}>
-            <View style={styles.contentStack}>
-              <View style={styles.formAnchor}>
-                <View style={styles.formSection}>
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Email</Text>
-                    <TextInput
-                      placeholder="Enter your email"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      autoCapitalize="none"
-                    />
-                  </View>
+            <View style={styles.contentSection}>
+              <View
+                style={[
+                  styles.contentStack,
+                  {
+                    width: formWidth,
+                    minHeight: isShortHeight ? 280 : 314,
+                  },
+                ]}
+              >
+                <View style={[styles.formAnchor, { width: formWidth }]}>
+                  <View style={styles.formSection}>
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Username</Text>
+                      <TextInput
+                        value={form.username}
+                        onChangeText={(value) => handleFieldChange("username", value)}
+                        placeholder="Enter your Username"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        autoCapitalize="none"
+                      />
+                    </View>
 
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Password</Text>
-                    <TextInput
-                      placeholder="Create a password"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      secureTextEntry
-                    />
-                  </View>
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Email</Text>
+                      <TextInput
+                        value={form.email}
+                        onChangeText={(value) => handleFieldChange("email", value)}
+                        placeholder="Enter your Email"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        autoComplete="email"
+                        textContentType="emailAddress"
+                      />
+                    </View>
 
-                  <View style={styles.fieldGroup}>
-                    <Text style={styles.label}>Confirm Password</Text>
-                    <TextInput
-                      placeholder="Confirm your password"
-                      placeholderTextColor="#5E6B7F"
-                      style={styles.input}
-                      secureTextEntry
-                    />
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Password</Text>
+                      <TextInput
+                        value={form.password}
+                        onChangeText={(value) => handleFieldChange("password", value)}
+                        placeholder="Create a password"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        secureTextEntry
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                      />
+                    </View>
+
+                    <View style={[styles.fieldGroup, { width: formWidth }]}>
+                      <Text style={styles.label}>Confirm password</Text>
+                      <TextInput
+                        value={form.confirmPassword}
+                        onChangeText={(value) => handleFieldChange("confirmPassword", value)}
+                        placeholder="Confirm your password"
+                        placeholderTextColor="#5E6B7F"
+                        style={styles.input}
+                        secureTextEntry
+                        autoComplete="new-password"
+                        textContentType="newPassword"
+                      />
+                    </View>
+
+                    <Pressable
+                      onPress={() => {
+                        setAcceptedTerms((current) => !current);
+                        setFormError("");
+                      }}
+                      style={({ pressed }) => [
+                        styles.termsRow,
+                        { width: formWidth },
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          acceptedTerms && styles.checkboxSelected,
+                        ]}
+                      >
+                        {acceptedTerms ? (
+                          <Ionicons name="checkmark-outline" size={14} color="#FFFFFF" />
+                        ) : null}
+                      </View>
+                      <Text style={styles.termsText}>
+                        I agree to the terms and privacy policy.
+                      </Text>
+                    </Pressable>
+
+                    {formError ? (
+                      <Text accessibilityRole="alert" style={styles.errorText}>
+                        {formError}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
               </View>
             </View>
-          </View>
 
-          <View style={styles.bottomSection}>
-            <Pressable style={styles.uploadSection}>
-              <View style={styles.uploadCircle}>
-                <Ionicons name="arrow-up-outline" size={24} color="#4EA955" />
-              </View>
-              <Text style={styles.uploadText}>Upload profile photo</Text>
-            </Pressable>
+            <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
+              <Pressable style={styles.uploadSection}>
+                <View style={styles.uploadCircle}>
+                  <Ionicons name="arrow-up-outline" size={24} color="#4EA955" />
+                </View>
+                <Text style={styles.uploadText}>Upload profile photo</Text>
+              </Pressable>
 
-            <Pressable
-              onPress={() => router.replace("/(onboarding)/welcome")}
-              style={({ pressed }) => [
-                styles.submitButton,
-                pressed && styles.buttonPressed,
-              ]}
-            >
-              <View pointerEvents="none" style={styles.submitBackground}>
-                <LinearGradient
-                  colors={["#5FBE67", "#4EA955", "#469A4D"]}
-                  start={{ x: 0, y: 0.5 }}
-                  end={{ x: 1, y: 0.5 }}
-                  style={styles.submitGradient}
-                />
-                <Animated.View
-                  style={[
-                    styles.shimmerWrap,
-                    { transform: [{ translateX: shimmerX }] },
-                  ]}
-                >
+              <Pressable
+                onPress={handleCompleteSignUp}
+                style={({ pressed }) => [
+                  styles.submitButton,
+                  { width: formWidth },
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View pointerEvents="none" style={styles.submitBackground}>
                   <LinearGradient
-                    colors={[
-                      "rgba(255,255,255,0)",
-                      "rgba(255,255,255,0.26)",
-                      "rgba(255,255,255,0)",
-                    ]}
+                    colors={["#5FBE67", "#4EA955", "#469A4D"]}
                     start={{ x: 0, y: 0.5 }}
                     end={{ x: 1, y: 0.5 }}
-                    style={styles.shimmer}
+                    style={styles.submitGradient}
                   />
-                </Animated.View>
-              </View>
-              <Text style={styles.submitText}>Complete sign up</Text>
-            </Pressable>
+                  <Animated.View
+                    style={[
+                      styles.shimmerWrap,
+                      { transform: [{ translateX: shimmerX }] },
+                    ]}
+                  >
+                    <LinearGradient
+                      colors={[
+                        "rgba(255,255,255,0)",
+                        "rgba(255,255,255,0.26)",
+                        "rgba(255,255,255,0)",
+                      ]}
+                      start={{ x: 0, y: 0.5 }}
+                      end={{ x: 1, y: 0.5 }}
+                      style={styles.shimmer}
+                    />
+                  </Animated.View>
+                </View>
+                <Text style={[styles.submitText, isCompactWidth && styles.compactSubmitText]}>
+                  Complete sign up
+                </Text>
+              </Pressable>
+
+              <Link href="/(auth)/login" style={styles.loginLink}>
+                Already have an account? Log in
+              </Link>
+            </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -143,26 +319,27 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F7F8FB",
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   outerShell: {
-    flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 18,
+    flexGrow: 1,
   },
   inner: {
-    flex: 1,
+    flexGrow: 1,
     borderRadius: 38,
     backgroundColor: "#F7F8FB",
-    paddingHorizontal: 20,
-    paddingTop: 34,
-    paddingBottom: 26,
   },
   headerSection: {
     alignItems: "center",
     paddingTop: 42,
     marginBottom: 28,
   },
+  compactHeaderSection: {
+    paddingTop: 24,
+    marginBottom: 22,
+  },
   wordmark: {
-    fontSize: 52,
     fontWeight: "600",
     color: "#111827",
     letterSpacing: 0.1,
@@ -181,17 +358,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   contentStack: {
-    width: FORM_WIDTH,
-    minHeight: 314,
     justifyContent: "flex-end",
     alignItems: "center",
   },
-  uploadSection: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
   formAnchor: {
-    width: FORM_WIDTH,
     justifyContent: "flex-end",
   },
   formSection: {
@@ -199,7 +369,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   fieldGroup: {
-    width: FORM_WIDTH,
     gap: 8,
   },
   label: {
@@ -217,6 +386,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     fontSize: 11,
     color: "#111827",
+  },
+  termsRow: {
+    minHeight: 44,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    backgroundColor: "#F4FFF7",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#A8C995",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxSelected: {
+    backgroundColor: "#4EA955",
+    borderColor: "#4EA955",
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#62716A",
+  },
+  errorText: {
+    width: "100%",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#991B1B",
+    textAlign: "center",
+  },
+  uploadSection: {
+    alignItems: "center",
+    marginBottom: 20,
   },
   uploadCircle: {
     width: 56,
@@ -240,8 +457,11 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     width: "100%",
   },
+  compactBottomSection: {
+    paddingHorizontal: 0,
+    paddingBottom: 8,
+  },
   submitButton: {
-    width: FORM_WIDTH,
     height: 54,
     borderRadius: 999,
     justifyContent: "center",
@@ -273,6 +493,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
     zIndex: 1,
+  },
+  compactSubmitText: {
+    fontSize: 14,
+  },
+  loginLink: {
+    marginTop: 14,
+    fontSize: 11,
+    color: "#62716A",
+    textTransform: "uppercase",
   },
   buttonPressed: {
     opacity: 0.92,
