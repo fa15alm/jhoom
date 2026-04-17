@@ -15,6 +15,10 @@ app.get("/", (req, res) => {
   res.send("Jhoom backend is running");
 });
 
+// Health Plan routes
+const healthPlanRoutes = require("./routes/healthPlan.routes");
+app.use("/api/health-plan", healthPlanRoutes);
+
 // Main API routes
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
