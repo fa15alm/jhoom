@@ -10,6 +10,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Logs routes (user activity tracking: workout, sleep, nutrition, etc.)
+const logRoutes = require("./routes/log.routes");
+app.use("/api/logs", logRoutes);
+
 // Test route
 app.get("/", (req, res) => {
   res.send("Jhoom backend is running");
