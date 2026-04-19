@@ -139,4 +139,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 database.db
+server/database.db
+uploads/
+server/uploads/
 .expo

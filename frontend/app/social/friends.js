@@ -1,13 +1,13 @@
 /*
  * Friends management screen.
  *
- * A focused list view for accepting pending friends and removing existing
- * connections. The main social feed has search/posting; this screen is a
- * simpler management surface that can be fed by the same social API later.
+ * Uses the live social connections API for incoming requests, outgoing requests,
+ * and active friends so changes stay in sync across the app.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -18,14 +18,49 @@ import {
 import AppHeader from "../../src/shared/ui/AppHeader";
 import BottomNav from "../../src/shared/ui/BottomNav";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { resolveApiAssetUrl } from "../../src/services/api/client";
+import {
+  getConnections,
+  removeFriend,
+  respondToFriendRequest,
+} from "../../src/services/api/socialApi";
+import { getAuthToken } from "../../src/services/authSession";
 
-// Local friend rows used until the friends endpoint owns this data.
-// Status values control which action buttons appear in the row.
-const starterFriends = [
-  { id: "maya", name: "Maya", username: "maya.moves", status: "Added" },
-  { id: "rio", name: "Rio", username: "rio.runs", status: "Added" },
-  { id: "sam", name: "Sam", username: "sam.lifts", status: "Pending" },
-];
+function FriendAvatar({ imageUrl }) {
+  const resolvedImageUrl = resolveApiAssetUrl(imageUrl);
+
+  return (
+    <View style={styles.friendAvatar}>
+      {resolvedImageUrl ? (
+        <Image source={{ uri: resolvedImageUrl }} style={styles.friendAvatarImage} />
+      ) : (
+        <Ionicons name="person-outline" size={16} color="#4EA955" />
+      )}
+    </View>
+  );
+}
+
+function FriendSection({ title, emptyText, rows, renderActions }) {
+  return (
+    <View style={styles.sectionBlock}>
+      <Text style={styles.sectionBlockTitle}>{title}</Text>
+      {rows.length === 0 ? (
+        <Text style={styles.emptyText}>{emptyText}</Text>
+      ) : (
+        rows.map((friend) => (
+          <View key={friend.id} style={styles.friendRow}>
+            <FriendAvatar imageUrl={friend.profilePictureUrl} />
+            <View style={styles.friendCopy}>
+              <Text style={styles.friendName}>{friend.name}</Text>
+              <Text style={styles.friendUsername}>@{friend.username}</Text>
+            </View>
+            <View style={styles.actionsWrap}>{renderActions(friend)}</View>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
 
 export default function FriendsScreen() {
   const {
@@ -37,21 +72,87 @@ export default function FriendsScreen() {
     shellMinHeight,
     cardWidth,
   } = useMobileFrame();
-  const [friends, setFriends] = useState(starterFriends);
+  const [connections, setConnections] = useState({
+    friends: [],
+    pendingIncoming: [],
+    pendingOutgoing: [],
+  });
+  const [notice, setNotice] = useState("");
 
-  function handleRemoveFriend(id) {
-    // Local remove action. Backend wiring should call socialApi.removeFriend.
-    setFriends((current) => current.filter((friend) => friend.id !== id));
+  useEffect(() => {
+    loadConnections();
+  }, []);
+
+  async function loadConnections() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in to manage friends.");
+      setConnections({
+        friends: [],
+        pendingIncoming: [],
+        pendingOutgoing: [],
+      });
+      return;
+    }
+
+    try {
+      setConnections(await getConnections(token));
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message || "Could not load friend connections.");
+    }
   }
 
-  function handleApproveFriend(id) {
-    // Approving a pending friend updates only local state for now.
-    // A backend version should accept the request and refresh the friend list.
-    setFriends((current) =>
-      current.map((friend) =>
-        friend.id === id ? { ...friend, status: "Added" } : friend,
-      ),
-    );
+  async function handleAcceptFriend(userId) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in again before accepting requests.");
+      return;
+    }
+
+    try {
+      await respondToFriendRequest(token, userId, "accept");
+      await loadConnections();
+      setNotice("Friend request accepted.");
+    } catch (error) {
+      setNotice(error.message || "Could not accept friend request.");
+    }
+  }
+
+  async function handleDeclineFriend(userId) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in again before declining requests.");
+      return;
+    }
+
+    try {
+      await respondToFriendRequest(token, userId, "decline");
+      await loadConnections();
+      setNotice("Friend request declined.");
+    } catch (error) {
+      setNotice(error.message || "Could not decline friend request.");
+    }
+  }
+
+  async function handleRemoveFriend(userId, message = "Friend removed.") {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in again before changing friends.");
+      return;
+    }
+
+    try {
+      await removeFriend(token, userId);
+      await loadConnections();
+      setNotice(message);
+    } catch (error) {
+      setNotice(error.message || "Could not update friend connection.");
+    }
   }
 
   return (
@@ -88,18 +189,16 @@ export default function FriendsScreen() {
                 <Ionicons name="people-outline" size={22} color="#4EA955" />
               </View>
 
-              {friends.map((friend) => (
-                <View key={friend.id} style={styles.friendRow}>
-                  <View style={styles.friendAvatar}>
-                    <Ionicons name="person-outline" size={16} color="#4EA955" />
-                  </View>
-                  <View style={styles.friendCopy}>
-                    <Text style={styles.friendName}>{friend.name}</Text>
-                    <Text style={styles.friendUsername}>@{friend.username}</Text>
-                  </View>
-                  {friend.status === "Pending" ? (
+              {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+
+              <FriendSection
+                title="Incoming requests"
+                emptyText="No incoming friend requests right now."
+                rows={connections.pendingIncoming}
+                renderActions={(friend) => (
+                  <>
                     <Pressable
-                      onPress={() => handleApproveFriend(friend.id)}
+                      onPress={() => handleAcceptFriend(friend.id)}
                       style={({ pressed }) => [
                         styles.actionButton,
                         pressed && styles.buttonPressed,
@@ -107,7 +206,24 @@ export default function FriendsScreen() {
                     >
                       <Text style={styles.actionText}>Accept</Text>
                     </Pressable>
-                  ) : null}
+                    <Pressable
+                      onPress={() => handleDeclineFriend(friend.id)}
+                      style={({ pressed }) => [
+                        styles.removeButton,
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <Text style={styles.removeText}>Decline</Text>
+                    </Pressable>
+                  </>
+                )}
+              />
+
+              <FriendSection
+                title="Friends"
+                emptyText="No active friends yet."
+                rows={connections.friends}
+                renderActions={(friend) => (
                   <Pressable
                     onPress={() => handleRemoveFriend(friend.id)}
                     style={({ pressed }) => [
@@ -117,8 +233,25 @@ export default function FriendsScreen() {
                   >
                     <Text style={styles.removeText}>Remove</Text>
                   </Pressable>
-                </View>
-              ))}
+                )}
+              />
+
+              <FriendSection
+                title="Sent requests"
+                emptyText="No outgoing requests right now."
+                rows={connections.pendingOutgoing}
+                renderActions={(friend) => (
+                  <Pressable
+                    onPress={() => handleRemoveFriend(friend.id, "Pending request cancelled.")}
+                    style={({ pressed }) => [
+                      styles.removeButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
+                    <Text style={styles.removeText}>Cancel</Text>
+                  </Pressable>
+                )}
+              />
             </View>
 
             <BottomNav />
@@ -171,6 +304,42 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
+  notice: {
+    marginBottom: 14,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: "700",
+    color: "#5E6B7F",
+  },
+  sectionBlock: {
+    marginBottom: 14,
+  },
+  sectionBlockTitle: {
+    marginBottom: 8,
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#83B66E",
+    textTransform: "uppercase",
+  },
+  emptyText: {
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#7A8699",
+    textAlign: "center",
+  },
   friendRow: {
     minHeight: 62,
     borderRadius: 20,
@@ -190,6 +359,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#E7F8EB",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  friendAvatarImage: {
+    width: "100%",
+    height: "100%",
   },
   friendCopy: {
     flex: 1,
@@ -204,6 +378,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: "#7A8699",
+  },
+  actionsWrap: {
+    flexDirection: "row",
+    gap: 6,
   },
   actionButton: {
     minHeight: 32,
@@ -236,7 +414,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   buttonPressed: {
-    opacity: 0.9,
+    opacity: 0.92,
     transform: [{ scale: 0.98 }],
   },
 });

@@ -1,16 +1,17 @@
 /*
  * Recommendations screen.
  *
- * Shows plan-derived suggestions in the same visual system as the rest of the
- * app. It currently reuses the local health-plan sections. Once the backend AI
- * endpoint exists, replace `getCurrentPlanSections` with `coachApi.getRecommendations`.
+ * Shows plan-derived suggestions in the same visual system as the rest of the app.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useEffect, useState } from "react";
 import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
 import AppHeader from "../../src/shared/ui/AppHeader";
 import BottomNav from "../../src/shared/ui/BottomNav";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
 import { getCurrentPlanSections } from "../../src/features/health-plan/healthPlan";
+import { getRecommendations } from "../../src/services/api/coachApi";
+import { getAuthToken } from "../../src/services/authSession";
 
 export default function RecommendationsScreen() {
   const {
@@ -22,9 +23,25 @@ export default function RecommendationsScreen() {
     shellMinHeight,
     cardWidth,
   } = useMobileFrame();
-  // Uses the same generated-plan sections as the AI coach until recommendation APIs exist.
-  // This keeps recommendations visible even before the AI backend is complete.
-  const recommendations = getCurrentPlanSections();
+  const [recommendations, setRecommendations] = useState(getCurrentPlanSections());
+
+  useEffect(() => {
+    async function loadRecommendations() {
+      const token = getAuthToken();
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        setRecommendations(await getRecommendations(token));
+      } catch {
+        setRecommendations(getCurrentPlanSections());
+      }
+    }
+
+    loadRecommendations();
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>

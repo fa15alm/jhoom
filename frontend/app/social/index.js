@@ -2,13 +2,14 @@
  * Social feed screen.
  *
  * Handles friend search, weekly feed posts, comments, likes, reporting, blocking,
- * and composing a new weekly post. Data is local for now, but every action is
- * already split into handlers so it can be replaced with `socialApi` calls.
+ * and composing a new weekly post.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useRef, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -20,31 +21,26 @@ import {
 import AppHeader from "../../src/shared/ui/AppHeader";
 import BottomNav from "../../src/shared/ui/BottomNav";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { getPagedCarouselIndex } from "../../src/shared/utils/carousel";
+import { resolveApiAssetUrl } from "../../src/services/api/client";
+import { getMyProfile, updateMyProfile } from "../../src/services/api/profileApi";
+import {
+  addComment,
+  blockUser,
+  createPost,
+  deleteComment,
+  getConnections,
+  getWeeklyFeed,
+  respondToFriendRequest,
+  reportContent,
+  searchUsers,
+  sendFriendRequest,
+  togglePostLike,
+} from "../../src/services/api/socialApi";
+import { uploadSocialPostImage } from "../../src/services/api/uploadApi";
+import { getAuthToken } from "../../src/services/authSession";
 
 const CARD_SPACING = 18;
-
-// Searchable starter users. Replace with socialApi.searchUsers when backend social exists.
-// The shape intentionally matches what the search endpoint should return.
-const FRIENDS = [
-  {
-    id: "maya",
-    name: "Maya",
-    username: "maya.moves",
-    focus: "Strength and steps",
-  },
-  {
-    id: "rio",
-    name: "Rio",
-    username: "rio.runs",
-    focus: "Cardio streaks",
-  },
-  {
-    id: "sam",
-    name: "Sam",
-    username: "sam.lifts",
-    focus: "Workout consistency",
-  },
-];
 
 function formatDateKey(date) {
   const year = date.getFullYear();
@@ -66,36 +62,25 @@ function getCurrentWeekKey(date = new Date()) {
   return formatDateKey(weekStart);
 }
 
-function buildStarterPosts(weekKey) {
-  // Local seed posts make the swipe feed interactive before the feed API is connected.
-  return [
-    {
-      id: "post-maya-1",
-      friendId: "maya",
-      authorName: "Maya",
-      username: "maya.moves",
-      imageTone: "#83B66E",
-      caption: "Morning walk done before work. Keeping the week moving.",
-      weekKey,
-      comments: [
-        { id: "comment-1", author: "Rio", text: "That route looks calm." },
-        { id: "comment-2", author: "You", text: "Strong start." },
-      ],
-    },
-    {
-      id: "post-rio-1",
-      friendId: "rio",
-      authorName: "Rio",
-      username: "rio.runs",
-      imageTone: "#6EA878",
-      caption: "Easy run today. Saving the legs for intervals tomorrow.",
-      weekKey,
-      comments: [{ id: "comment-3", author: "Maya", text: "Nice pacing." }],
-    },
-  ];
+function Avatar({ imageUrl, size = 34, iconSize = 16 }) {
+  const resolvedImageUrl = resolveApiAssetUrl(imageUrl);
+
+  return (
+    <View style={[styles.friendAvatar, { width: size, height: size, borderRadius: size / 2 }]}>
+      {resolvedImageUrl ? (
+        <Image
+          source={{ uri: resolvedImageUrl }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+        />
+      ) : (
+        <Ionicons name="person-outline" size={iconSize} color="#4EA955" />
+      )}
+    </View>
+  );
 }
 
 export default function SocialScreen() {
+  const router = useRouter();
   const {
     shellPaddingHorizontal,
     shellPaddingVertical,
@@ -109,17 +94,22 @@ export default function SocialScreen() {
   const currentWeekKey = getCurrentWeekKey();
   const [isSearchOpen, setIsSearchOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [addedFriendIds, setAddedFriendIds] = useState(["maya", "rio"]);
-  const [pendingFriendIds, setPendingFriendIds] = useState([]);
+  const [friends, setFriends] = useState([]);
+  const [connections, setConnections] = useState({
+    friends: [],
+    pendingIncoming: [],
+    pendingOutgoing: [],
+  });
   const [blockedFriendIds, setBlockedFriendIds] = useState([]);
-  const [posts, setPosts] = useState(() => buildStarterPosts(getCurrentWeekKey()));
+  const [posts, setPosts] = useState([]);
   const [commentDrafts, setCommentDrafts] = useState({});
   const [caption, setCaption] = useState("");
-  const [hasPhoto, setHasPhoto] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [likedPostIds, setLikedPostIds] = useState([]);
   const [reportedPostIds, setReportedPostIds] = useState([]);
   const [profileVisibility, setProfileVisibility] = useState("Friends only");
   const [activeFeedIndex, setActiveFeedIndex] = useState(0);
+  const [socialNotice, setSocialNotice] = useState("");
   // Track which swipe card is most visible so the pagination dots stay in sync.
   const feedViewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
@@ -130,7 +120,104 @@ export default function SocialScreen() {
     }
   }).current;
 
-  const filteredFriends = FRIENDS.filter((friend) => {
+  function handleFeedScroll(event) {
+    setActiveFeedIndex(getPagedCarouselIndex(event, sliderWidth, weeklyPosts.length));
+  }
+
+  const loadSocialData = useCallback(async () => {
+    const token = getAuthToken();
+
+    if (!token) {
+      setPosts([]);
+      setFriends([]);
+      setConnections({
+        friends: [],
+        pendingIncoming: [],
+        pendingOutgoing: [],
+      });
+      return;
+    }
+
+    try {
+      const [feed, nextConnections] = await Promise.all([
+        getWeeklyFeed(token),
+        getConnections(token),
+        loadFriendSearch(searchQuery),
+      ]);
+      setPosts(feed);
+      setConnections(nextConnections);
+      setSocialNotice("");
+    } catch (error) {
+      setSocialNotice(error.message || "Could not load social feed.");
+      setPosts([]);
+    }
+  }, [searchQuery]);
+
+  useEffect(() => {
+    loadSocialData();
+  }, [loadSocialData]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadSocialData();
+    }, [loadSocialData])
+  );
+
+  useEffect(() => {
+    loadSocialVisibility();
+  }, []);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      loadFriendSearch(searchQuery);
+    }, 250);
+
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
+
+  async function loadFriendSearch(query) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setFriends([]);
+      return;
+    }
+
+    try {
+      const trimmedQuery = query.trim();
+
+      if (!trimmedQuery) {
+        setFriends([]);
+        return;
+      }
+
+      const results = await searchUsers(token, trimmedQuery);
+      setFriends(results);
+    } catch {
+      setFriends([]);
+    }
+  }
+
+  async function loadSocialVisibility() {
+    const token = getAuthToken();
+
+    if (!token) {
+      return;
+    }
+
+    try {
+      const profile = await getMyProfile(token);
+      setProfileVisibility(
+        profile.is_dob_public || profile.is_age_public || profile.is_height_public || profile.is_weight_public
+          ? "Friends only"
+          : "Private"
+      );
+    } catch {
+      // Keep default if the profile request fails.
+    }
+  }
+
+  const filteredFriends = friends.filter((friend) => {
     // Search is local now. Backend search should apply the same blocked-user
     // filtering server-side so blocked people do not reappear.
     const query = searchQuery.trim().toLowerCase();
@@ -147,32 +234,80 @@ export default function SocialScreen() {
       .toLowerCase()
       .includes(query);
   });
+  const addedFriendIds = connections.friends.map((friend) => friend.id);
+  const pendingIncomingIds = connections.pendingIncoming.map((friend) => friend.id);
+  const pendingOutgoingIds = connections.pendingOutgoing.map((friend) => friend.id);
 
   // Feed items are filtered by the current week key so old posts naturally drop
   // out when a new week starts. Backend feed data should use the same idea.
   const weeklyPosts = posts.filter(
     (post) =>
-      post.weekKey === currentWeekKey &&
       !blockedFriendIds.includes(post.friendId) &&
       (post.friendId === "you" || addedFriendIds.includes(post.friendId)),
   );
 
-  function handleAddFriend(friendId) {
-    // Sends a local pending request. Backend wiring should call sendFriendRequest.
-    setPendingFriendIds((current) =>
-      current.includes(friendId) || addedFriendIds.includes(friendId)
-        ? current
-        : [...current, friendId],
-    );
+  async function handleAddFriend(friendId) {
+    const token = getAuthToken();
+
+    if (token && Number.isFinite(Number(friendId))) {
+      try {
+        const response = await sendFriendRequest(token, friendId);
+        if (response.status === "accepted") {
+          setSocialNotice("Friend added.");
+          const [nextConnections, nextFeed] = await Promise.all([
+            getConnections(token),
+            getWeeklyFeed(token),
+          ]);
+          setConnections(nextConnections);
+          setPosts(nextFeed);
+        } else {
+          setSocialNotice("Friend request sent.");
+          setConnections(await getConnections(token));
+        }
+      } catch (error) {
+        setSocialNotice(error.message || "Could not send friend request.");
+        return;
+      }
+    }
   }
 
-  function handleApprovePendingFriend(friendId) {
-    // Local accept path used by the demo search results. A backend version
-    // should approve the request and then refresh the user's friend list.
-    setPendingFriendIds((current) => current.filter((id) => id !== friendId));
-    setAddedFriendIds((current) =>
-      current.includes(friendId) ? current : [...current, friendId],
-    );
+  async function handleApprovePendingFriend(friendId) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSocialNotice("Log in again before accepting requests.");
+      return;
+    }
+
+    try {
+      await respondToFriendRequest(token, friendId, "accept");
+      const [nextConnections, nextFeed] = await Promise.all([
+        getConnections(token),
+        getWeeklyFeed(token),
+      ]);
+      setConnections(nextConnections);
+      setPosts(nextFeed);
+      setSocialNotice("Friend request accepted.");
+    } catch (error) {
+      setSocialNotice(error.message || "Could not accept friend request.");
+    }
+  }
+
+  async function handleDeclinePendingFriend(friendId) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSocialNotice("Log in again before declining requests.");
+      return;
+    }
+
+    try {
+      await respondToFriendRequest(token, friendId, "decline");
+      setConnections(await getConnections(token));
+      setSocialNotice("Friend request declined.");
+    } catch (error) {
+      setSocialNotice(error.message || "Could not decline friend request.");
+    }
   }
 
   function handleCommentChange(postId, value) {
@@ -182,29 +317,35 @@ export default function SocialScreen() {
     }));
   }
 
-  function handleAddComment(postId) {
-    // Adds comments locally now; later this should call socialApi.addComment.
+  async function handleAddComment(postId) {
     const draft = commentDrafts[postId]?.trim();
 
     if (!draft) {
       return;
     }
 
-    // Comments are local for now; this is where post comments should be saved
-    // to the backend and synced into the friend's weekly feed.
+    const token = getAuthToken();
+    let savedComment = {
+      id: `comment-${postId}-${Date.now()}`,
+      author: "You",
+      text: draft,
+    };
+
+    if (token && Number.isFinite(Number(postId))) {
+      try {
+        savedComment = await addComment(token, postId, { text: draft });
+      } catch (error) {
+        setSocialNotice(error.message || "Could not save comment.");
+        return;
+      }
+    }
+
     setPosts((current) =>
       current.map((post) =>
         post.id === postId
           ? {
               ...post,
-              comments: [
-                ...post.comments,
-                {
-                  id: `comment-${postId}-${Date.now()}`,
-                  author: "You",
-                  text: draft,
-                },
-              ],
+              comments: [...post.comments, savedComment],
             }
           : post,
       ),
@@ -212,7 +353,18 @@ export default function SocialScreen() {
     setCommentDrafts((current) => ({ ...current, [postId]: "" }));
   }
 
-  function handleDeleteComment(postId, commentId) {
+  async function handleDeleteComment(postId, commentId) {
+    const token = getAuthToken();
+
+    if (token && Number.isFinite(Number(postId)) && Number.isFinite(Number(commentId))) {
+      try {
+        await deleteComment(token, postId, commentId);
+      } catch (error) {
+        setSocialNotice(error.message || "Could not delete comment.");
+        return;
+      }
+    }
+
     setPosts((current) =>
       current.map((post) =>
         post.id === postId
@@ -225,9 +377,29 @@ export default function SocialScreen() {
     );
   }
 
-  function handleToggleLike(postId) {
-    // Toggle locally for immediate feedback. The backend should be the source
-    // of truth for final like counts and whether the user has liked a post.
+  async function handleToggleLike(postId) {
+    const token = getAuthToken();
+
+    if (token && Number.isFinite(Number(postId))) {
+      try {
+        const nextLike = await togglePostLike(token, postId);
+        setPosts((current) =>
+          current.map((post) =>
+            post.id === postId
+              ? {
+                  ...post,
+                  likedByMe: nextLike.likedByMe,
+                  likeCount: nextLike.likeCount,
+                }
+              : post,
+          ),
+        );
+      } catch (error) {
+        setSocialNotice(error.message || "Could not update like.");
+      }
+      return;
+    }
+
     setLikedPostIds((current) =>
       current.includes(postId)
         ? current.filter((id) => id !== postId)
@@ -235,48 +407,169 @@ export default function SocialScreen() {
     );
   }
 
-  function handleReportPost(postId) {
+  async function handleReportPost(postId) {
+    const token = getAuthToken();
+
+    if (token && Number.isFinite(Number(postId))) {
+      try {
+        await reportContent(token, {
+          postId,
+          reason: "Reported from social feed",
+        });
+      } catch (error) {
+        setSocialNotice(error.message || "Could not submit report.");
+        return;
+      }
+    }
+
     setReportedPostIds((current) =>
       current.includes(postId) ? current : [...current, postId],
     );
   }
 
-  function handleBlockFriend(friendId) {
+  async function handleBlockFriend(friendId) {
     // Blocking removes the user from all local social views immediately.
     // Backend blocking should also prevent future search/feed/comment visibility.
+    const token = getAuthToken();
+
+    if (token && Number.isFinite(Number(friendId))) {
+      try {
+        await blockUser(token, friendId);
+      } catch (error) {
+        setSocialNotice(error.message || "Could not block user.");
+        return;
+      }
+    }
+
     setBlockedFriendIds((current) =>
       current.includes(friendId) ? current : [...current, friendId],
     );
-    setAddedFriendIds((current) => current.filter((id) => id !== friendId));
-    setPendingFriendIds((current) => current.filter((id) => id !== friendId));
+    if (token) {
+      try {
+        const [nextConnections, nextFeed] = await Promise.all([
+          getConnections(token),
+          getWeeklyFeed(token),
+        ]);
+        setConnections(nextConnections);
+        setPosts(nextFeed);
+      } catch {
+        // Keep the local blocked state even if refresh fails.
+      }
+    }
   }
 
-  function handleCreatePost() {
-    // Creates a local weekly post; media upload and persistence come from the backend later.
-    const trimmedCaption = caption.trim();
-
-    if (!trimmedCaption && !hasPhoto) {
+  function handleSelectPostPhoto() {
+    if (typeof document === "undefined") {
+      setSocialNotice("Photo uploads are available in the web app.");
       return;
     }
 
-    // Replace the placeholder photo state with an image picker/upload when the
-    // real media storage flow is connected.
-    setPosts((current) => [
-      {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+
+    input.onchange = () => {
+      const file = input.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        setSocialNotice("Choose an image file for your post.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        setSelectedPhoto({
+          name: file.name,
+          uri: reader.result,
+        });
+        setSocialNotice("");
+      };
+      reader.onerror = () => {
+        setSocialNotice("Could not read that image.");
+      };
+      reader.readAsDataURL(file);
+    };
+
+    input.click();
+  }
+
+  async function handleCreatePost() {
+    const trimmedCaption = caption.trim();
+
+    if (!trimmedCaption && !selectedPhoto?.uri) {
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      setSocialNotice("Log in again before posting.");
+      return;
+    }
+    let savedPost = {
         id: `post-you-${Date.now()}`,
         friendId: "you",
         authorName: "You",
         username: "you",
         imageTone: "#4EA955",
         caption: trimmedCaption || "Photo update",
+        imageUrl: selectedPhoto?.uri || null,
         weekKey: currentWeekKey,
         comments: [],
-      },
-      ...current,
-    ]);
+      };
+
+    try {
+      let uploadedImageUrl = null;
+
+      if (selectedPhoto?.uri) {
+        const uploadedImage = await uploadSocialPostImage(token, {
+          dataUrl: selectedPhoto.uri,
+          filename: selectedPhoto.name,
+        });
+        uploadedImageUrl = uploadedImage.url;
+      }
+
+      savedPost = await createPost(token, {
+        caption: trimmedCaption,
+        imageUrl: uploadedImageUrl,
+      });
+    } catch (error) {
+      setSocialNotice(error.message || "Could not create post.");
+      return;
+    }
+
+    setPosts((current) => [savedPost, ...current]);
     setCaption("");
-    setHasPhoto(false);
+    setSelectedPhoto(null);
     setActiveFeedIndex(0);
+    setSocialNotice("");
+  }
+
+  async function handleChangeProfileVisibility(option) {
+    setProfileVisibility(option);
+    const token = getAuthToken();
+
+    if (!token) {
+      setSocialNotice("Log in again before changing social visibility.");
+      return;
+    }
+
+    const isVisible = option === "Friends only";
+
+    try {
+      await updateMyProfile(token, {
+        is_dob_public: isVisible,
+        is_age_public: isVisible,
+        is_height_public: isVisible,
+        is_weight_public: isVisible,
+      });
+      setSocialNotice(`Social visibility saved as ${option}.`);
+    } catch (error) {
+      setSocialNotice(error.message || "Could not update social visibility.");
+    }
   }
 
   return (
@@ -337,66 +630,94 @@ export default function SocialScreen() {
                     />
                   </View>
 
-                  <View style={styles.friendList}>
-                    {filteredFriends.map((friend) => {
-                      const isAdded = addedFriendIds.includes(friend.id);
-                      const isPending = pendingFriendIds.includes(friend.id);
+                  {socialNotice ? (
+                    <Text style={styles.pendingTitle}>{socialNotice}</Text>
+                  ) : null}
 
-                      return (
-                        <View key={friend.id} style={styles.friendRow}>
-                          <View style={styles.friendAvatar}>
-                            <Ionicons name="person-outline" size={16} color="#4EA955" />
+                  <View style={styles.friendList}>
+                    {filteredFriends.length > 0 ? (
+                      filteredFriends.map((friend) => {
+                        const isAdded = addedFriendIds.includes(friend.id);
+                        const hasIncomingRequest = pendingIncomingIds.includes(friend.id);
+                        const hasOutgoingRequest = pendingOutgoingIds.includes(friend.id);
+                        const isPending = hasIncomingRequest || hasOutgoingRequest;
+                        const actionLabel = hasIncomingRequest
+                          ? "Accept"
+                          : hasOutgoingRequest
+                            ? "Pending"
+                            : isAdded
+                              ? "Added"
+                              : "Add";
+                        const canSendRequest = !isAdded && !isPending;
+
+                        return (
+                          <View key={friend.id} style={styles.friendRow}>
+                            <Avatar imageUrl={friend.profilePictureUrl} />
+                            <View style={styles.friendCopy}>
+                              <Text style={styles.friendName}>{friend.name}</Text>
+                              <Text style={styles.friendUsername}>@{friend.username}</Text>
+                            </View>
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={
+                                canSendRequest
+                                  ? `Add ${friend.username}`
+                                  : `${friend.username} ${actionLabel.toLowerCase()}`
+                              }
+                              disabled={hasOutgoingRequest || isAdded}
+                              onPress={() => (
+                                hasIncomingRequest
+                                  ? handleApprovePendingFriend(friend.id)
+                                  : handleAddFriend(friend.id)
+                              )}
+                              style={({ pressed }) => [
+                                styles.addButton,
+                                (isAdded || isPending) && styles.addButtonAdded,
+                                pressed && canSendRequest && styles.buttonPressed,
+                              ]}
+                            >
+                              <Text style={styles.addButtonText}>{actionLabel}</Text>
+                            </Pressable>
                           </View>
-                          <View style={styles.friendCopy}>
-                            <Text style={styles.friendName}>{friend.name}</Text>
-                            <Text style={styles.friendUsername}>@{friend.username}</Text>
-                          </View>
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={
-                              isAdded || isPending
-                                ? `${friend.username} ${isPending ? "pending" : "added"}`
-                                : `Add ${friend.username}`
-                            }
-                            disabled={isAdded || isPending}
-                            onPress={() => handleAddFriend(friend.id)}
-                            style={({ pressed }) => [
-                              styles.addButton,
-                              (isAdded || isPending) && styles.addButtonAdded,
-                              pressed && !isAdded && !isPending && styles.buttonPressed,
-                            ]}
-                          >
-                            <Text style={styles.addButtonText}>
-                              {isPending ? "Pending" : isAdded ? "Added" : "Add"}
-                            </Text>
-                          </Pressable>
-                        </View>
-                      );
-                    })}
+                        );
+                      })
+                    ) : (
+                      <Text style={styles.searchEmptyText}>
+                        {searchQuery.trim()
+                          ? "No users matched that username."
+                          : "Search by username to find friends."}
+                      </Text>
+                    )}
                   </View>
 
-                  {pendingFriendIds.length > 0 ? (
+                  {pendingIncomingIds.length > 0 ? (
                     <View style={styles.pendingBox}>
                       <Text style={styles.pendingTitle}>Pending requests</Text>
-                      {pendingFriendIds.map((friendId) => {
-                        const friend = FRIENDS.find((item) => item.id === friendId);
-
-                        if (!friend) {
-                          return null;
-                        }
+                      {connections.pendingIncoming.map((friend) => {
 
                         return (
                           <View key={friend.id} style={styles.pendingRow}>
                             <Text style={styles.pendingName}>@{friend.username}</Text>
-                            <Pressable
-                              onPress={() => handleApprovePendingFriend(friend.id)}
-                              style={({ pressed }) => [
-                                styles.approveButton,
-                                pressed && styles.buttonPressed,
-                              ]}
-                            >
-                              <Text style={styles.approveText}>Approve</Text>
-                            </Pressable>
+                            <View style={styles.pendingActions}>
+                              <Pressable
+                                onPress={() => handleApprovePendingFriend(friend.id)}
+                                style={({ pressed }) => [
+                                  styles.approveButton,
+                                  pressed && styles.buttonPressed,
+                                ]}
+                              >
+                                <Text style={styles.approveText}>Accept</Text>
+                              </Pressable>
+                              <Pressable
+                                onPress={() => handleDeclinePendingFriend(friend.id)}
+                                style={({ pressed }) => [
+                                  styles.pendingDeclineButton,
+                                  pressed && styles.buttonPressed,
+                                ]}
+                              >
+                                <Text style={styles.pendingDeclineText}>Decline</Text>
+                              </Pressable>
+                            </View>
                           </View>
                         );
                       })}
@@ -427,51 +748,82 @@ export default function SocialScreen() {
                       renderItem={({ item: post }) => (
                         <View
                           key={post.id}
-                          style={[styles.postCard, { width: cardWidth }]}
+                          style={[
+                            styles.postCard,
+                            { width: cardWidth },
+                          ]}
                         >
                           {reportedPostIds.includes(post.id) ? (
                             <Text style={styles.reportedText}>Reported</Text>
                           ) : null}
 
                           <View style={styles.postHeader}>
-                            <View style={styles.friendAvatar}>
-                              <Ionicons name="person-outline" size={15} color="#4EA955" />
-                            </View>
+                            <Avatar
+                              imageUrl={post.authorProfilePictureUrl}
+                              size={34}
+                              iconSize={15}
+                            />
                             <View>
                               <Text style={styles.friendName}>{post.authorName}</Text>
                               <Text style={styles.friendUsername}>@{post.username}</Text>
                             </View>
                           </View>
 
-                          <View
-                            style={[
-                              styles.postImage,
-                              { backgroundColor: post.imageTone },
-                            ]}
-                          >
-                            <Ionicons name="image-outline" size={28} color="#FFFFFF" />
-                          </View>
+                          {post.imageUrl ? (
+                            <Image
+                              source={{ uri: resolveApiAssetUrl(post.imageUrl) }}
+                              style={styles.postImage}
+                            />
+                          ) : (
+                            <View
+                              style={[
+                                styles.postImage,
+                                { backgroundColor: post.imageTone },
+                              ]}
+                            >
+                              <Ionicons name="image-outline" size={28} color="#FFFFFF" />
+                            </View>
+                          )}
 
                           <Text style={styles.postCaption}>{post.caption}</Text>
 
                           <View style={styles.postActions}>
                             <Pressable
+                              onPress={() => router.push(`/social/post/${post.id}`)}
+                              style={({ pressed }) => [
+                                styles.postActionButton,
+                                pressed && styles.buttonPressed,
+                              ]}
+                            >
+                              <Text style={styles.postActionText}>Open</Text>
+                            </Pressable>
+                            <Pressable
                               onPress={() => handleToggleLike(post.id)}
                               style={({ pressed }) => [
                                 styles.postActionButton,
-                                likedPostIds.includes(post.id) && styles.postActionButtonActive,
+                                (post.likedByMe || likedPostIds.includes(post.id)) &&
+                                  styles.postActionButtonActive,
                                 pressed && styles.buttonPressed,
                               ]}
                             >
                               <Ionicons
-                                name={likedPostIds.includes(post.id) ? "heart" : "heart-outline"}
+                                name={
+                                  post.likedByMe || likedPostIds.includes(post.id)
+                                    ? "heart"
+                                    : "heart-outline"
+                                }
                                 size={15}
-                                color={likedPostIds.includes(post.id) ? "#FFFFFF" : "#4EA955"}
+                                color={
+                                  post.likedByMe || likedPostIds.includes(post.id)
+                                    ? "#FFFFFF"
+                                    : "#4EA955"
+                                }
                               />
                               <Text
                                 style={[
                                   styles.postActionText,
-                                  likedPostIds.includes(post.id) && styles.postActionTextActive,
+                                  (post.likedByMe || likedPostIds.includes(post.id)) &&
+                                    styles.postActionTextActive,
                                 ]}
                               >
                                 Like
@@ -507,17 +859,25 @@ export default function SocialScreen() {
                               style={styles.commentsScroll}
                               nestedScrollEnabled
                               showsVerticalScrollIndicator={false}
+                              pointerEvents="box-none"
                             >
                               {post.comments.length > 0 ? (
                                 post.comments.map((comment) => (
                                   <View key={comment.id} style={styles.commentRow}>
-                                    <Text style={styles.commentText}>
-                                      <Text style={styles.commentAuthor}>
-                                        {comment.author}:{" "}
+                                    <Avatar
+                                      imageUrl={comment.authorProfilePictureUrl}
+                                      size={28}
+                                      iconSize={13}
+                                    />
+                                    <View style={styles.commentCopy}>
+                                      <Text style={styles.commentText}>
+                                        <Text style={styles.commentAuthor}>
+                                          {comment.author}:{" "}
+                                        </Text>
+                                        {comment.text}
                                       </Text>
-                                      {comment.text}
-                                    </Text>
-                                    {comment.author === "You" ? (
+                                    </View>
+                                    {comment.isMine ? (
                                       <Pressable
                                         onPress={() => handleDeleteComment(post.id, comment.id)}
                                       >
@@ -556,7 +916,10 @@ export default function SocialScreen() {
                           </View>
                         </View>
                       )}
+                      onScroll={handleFeedScroll}
+                      onMomentumScrollEnd={handleFeedScroll}
                       viewabilityConfig={feedViewabilityConfig}
+                      scrollEventThrottle={16}
                       onViewableItemsChanged={onFeedViewableItemsChanged}
                     />
 
@@ -595,22 +958,32 @@ export default function SocialScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Upload a photo"
-                  onPress={() => setHasPhoto((current) => !current)}
+                  onPress={handleSelectPostPhoto}
                   style={({ pressed }) => [
                     styles.uploadBox,
-                    hasPhoto && styles.uploadBoxActive,
+                    selectedPhoto && styles.uploadBoxActive,
                     pressed && styles.buttonPressed,
                   ]}
                 >
-                  <Ionicons
-                    name={hasPhoto ? "checkmark-circle-outline" : "image-outline"}
-                    size={24}
-                    color={hasPhoto ? "#FFFFFF" : "#4EA955"}
-                  />
-                  <Text style={[styles.uploadText, hasPhoto && styles.uploadTextActive]}>
-                    {hasPhoto ? "Photo selected" : "Upload photo"}
-                  </Text>
+                  {selectedPhoto?.uri ? (
+                    <Image source={{ uri: selectedPhoto.uri }} style={styles.composePreviewImage} />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="image-outline"
+                        size={24}
+                        color="#4EA955"
+                      />
+                      <Text style={styles.uploadText}>Upload photo</Text>
+                    </>
+                  )}
                 </Pressable>
+
+                {selectedPhoto?.name ? (
+                  <Text style={styles.uploadFileName} numberOfLines={1}>
+                    {selectedPhoto.name}
+                  </Text>
+                ) : null}
 
                 <TextInput
                   value={caption}
@@ -630,8 +1003,8 @@ export default function SocialScreen() {
                     onPress={handleCreatePost}
                     style={({ pressed }) => [
                       styles.postButton,
-                      !caption.trim() && !hasPhoto && styles.postButtonDisabled,
-                      pressed && (caption.trim() || hasPhoto) && styles.buttonPressed,
+                      !caption.trim() && !selectedPhoto?.uri && styles.postButtonDisabled,
+                      pressed && (caption.trim() || selectedPhoto?.uri) && styles.buttonPressed,
                     ]}
                   >
                     <Text style={styles.postButtonText}>Post</Text>
@@ -654,7 +1027,7 @@ export default function SocialScreen() {
                     return (
                       <Pressable
                         key={option}
-                        onPress={() => setProfileVisibility(option)}
+                        onPress={() => handleChangeProfileVisibility(option)}
                         style={({ pressed }) => [
                           styles.visibilityChip,
                           isSelected && styles.visibilityChipSelected,
@@ -777,6 +1150,19 @@ const styles = StyleSheet.create({
   friendList: {
     gap: 10,
   },
+  searchEmptyText: {
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#7A8699",
+    textAlign: "center",
+  },
   friendRow: {
     minHeight: 58,
     borderRadius: 20,
@@ -850,6 +1236,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
+  pendingActions: {
+    flexDirection: "row",
+    gap: 6,
+  },
   pendingName: {
     fontSize: 12,
     fontWeight: "800",
@@ -869,6 +1259,22 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     textTransform: "uppercase",
   },
+  pendingDeclineButton: {
+    minHeight: 30,
+    borderRadius: 999,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  pendingDeclineText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#991B1B",
+    textTransform: "uppercase",
+  },
   uploadBox: {
     minHeight: 74,
     borderRadius: 22,
@@ -879,10 +1285,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
     marginBottom: 12,
+    overflow: "hidden",
   },
   uploadBoxActive: {
     backgroundColor: "#4EA955",
     borderColor: "#4EA955",
+  },
+  composePreviewImage: {
+    width: "100%",
+    height: "100%",
   },
   uploadText: {
     fontSize: 12,
@@ -892,6 +1303,14 @@ const styles = StyleSheet.create({
   },
   uploadTextActive: {
     color: "#FFFFFF",
+  },
+  uploadFileName: {
+    marginTop: -4,
+    marginBottom: 10,
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#7A8699",
+    textAlign: "center",
   },
   captionInput: {
     minHeight: 76,
@@ -1060,6 +1479,9 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#3F4858",
     marginBottom: 5,
+  },
+  commentCopy: {
+    flex: 1,
   },
   commentRow: {
     flexDirection: "row",

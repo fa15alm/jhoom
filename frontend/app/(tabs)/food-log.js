@@ -2,13 +2,13 @@ import { SafeAreaView, StyleSheet, Text, View } from "react-native";
 
 //import React hooks + logs API
 import { useEffect, useState } from "react";
-import { getLogs } from "../services/api/logsApi";
+import { getLogs } from "../../src/services/api/logsApi";
+import { getAuthToken } from "../../src/services/authSession";
 
 export default function FoodLogScreen() {
   //state to store logs from backend
   const [logs, setLogs] = useState([]);
- // TEMP: hardcoded token for testing (replace later with auth store)
-  const token = "PASTE_YOUR_TOKEN_HERE";
+  const [error, setError] = useState("");
 
   //runs when screen loads
   useEffect(() => {
@@ -18,10 +18,13 @@ export default function FoodLogScreen() {
   //function to fetch logs from backend
   async function loadLogs() {
     try {
-      const data = await getLogs(token);
+      const token = getAuthToken();
+      const data = token ? await getLogs(token, { type: "nutrition" }) : [];
       setLogs(data);
+      setError(token ? "" : "Log in to view food logs.");
     } catch (err) {
       console.log("Error loading logs:", err);
+      setError(err.message || "Could not load food logs.");
     }
   }
   
@@ -32,8 +35,10 @@ export default function FoodLogScreen() {
         <Text style={styles.text}>
           This is where users will log meals, calories, and nutrition.
         </Text> 
-  //display logs from backend 
-  {logs.map((log) => (
+        {logs.length === 0 ? (
+          <Text style={{ marginTop: 10 }}>{error || "No logs yet"}</Text>
+        ) : null}
+        {logs.map((log) => (
           <View key={log.id} style={{ marginTop: 10 }}>
             <Text>{log.name}</Text>
             <Text>{log.typeKey}</Text>

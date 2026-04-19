@@ -22,6 +22,7 @@ import {
   View,
 } from "react-native";
 import useMobileFrame from "../src/shared/hooks/useMobileFrame";
+import { getPagedCarouselIndex } from "../src/shared/utils/carousel";
 
 const CARD_SPACING = 18;
 const SHIMMER_TRAVEL = 220;
@@ -222,6 +223,10 @@ export default function LandingPage() {
     }
   }).current;
 
+  function handleCarouselScroll(event) {
+    setActiveIndex(getPagedCarouselIndex(event, sliderWidth, slides.length));
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -271,7 +276,10 @@ export default function LandingPage() {
                     short={isShortHeight}
                   />
                 )}
+                onScroll={handleCarouselScroll}
+                onMomentumScrollEnd={handleCarouselScroll}
                 onViewableItemsChanged={onViewableItemsChanged}
+                scrollEventThrottle={16}
                 viewabilityConfig={viewabilityConfig}
               />
 

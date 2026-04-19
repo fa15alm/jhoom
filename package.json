@@ -1,0 +1,15 @@
+{
+  "name": "jhoom",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix frontend install",
+    "setup": "npm --prefix server run setup-db",
+    "dev": "node scripts/dev.js",
+    "web": "node scripts/dev.js",
+    "build": "npm --prefix frontend run build:web",
+    "start": "npm --prefix server start",
+    "lint": "npm --prefix frontend run lint",
+    "smoke": "node scripts/smoke.js"
+  }
+}

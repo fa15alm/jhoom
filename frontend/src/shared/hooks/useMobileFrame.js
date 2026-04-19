@@ -18,7 +18,10 @@ export default function useMobileFrame() {
   const innerPaddingHorizontal = isCompactWidth ? 16 : 20;
   const innerPaddingTop = isShortHeight ? 24 : 34;
   const innerPaddingBottom = isShortHeight ? 18 : 26;
-  const shellMinHeight = Math.max(height - shellPaddingVertical * 2, 660);
+  const shellMinHeight = Math.max(
+    height - shellPaddingVertical * 2,
+    isShortHeight ? 560 : 660,
+  );
   // sliderWidth is the outer carousel width; cardWidth is the internal card
   // width after carousel side padding. Keeping both here aligns every screen.
   const sliderWidth = Math.min(width - (isCompactWidth ? 52 : 72), 420);

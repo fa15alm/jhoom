@@ -17,9 +17,11 @@ export default function RootLayout() {
       <Stack.Screen name="log" />
       <Stack.Screen name="milestones" />
       <Stack.Screen name="ai" />
-      <Stack.Screen name="recommendations" />
-      <Stack.Screen name="social" />
-      <Stack.Screen name="settings" />
+      <Stack.Screen name="recommendations/index" />
+      <Stack.Screen name="social/index" />
+      <Stack.Screen name="social/friends" />
+      <Stack.Screen name="social/post/[id]" />
+      <Stack.Screen name="settings/index" />
     </Stack>
   );
 }

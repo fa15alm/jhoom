@@ -2,13 +2,13 @@ import { SafeAreaView, StyleSheet, Text, View } from "react-native";
 
 //import hooks + logs API
 import { useEffect, useState } from "react";
-import { getLogs } from "../services/api/logsApi";
+import { getLogs } from "../../src/services/api/logsApi";
+import { getAuthToken } from "../../src/services/authSession";
 
 export default function WorkoutLogScreen() {
   //state to store logs
   const [logs, setLogs] = useState([]);
-  //TEMP: hardcoded token for testing
-  const token = "PASTE_YOUR_TOKEN_HERE";
+  const [error, setError] = useState("");
 
   //load logs when screen opens
   useEffect(() => {
@@ -18,10 +18,13 @@ export default function WorkoutLogScreen() {
   //fetch logs from backend
   async function loadLogs() {
     try {
-      const data = await getLogs(token);
+      const token = getAuthToken();
+      const data = token ? await getLogs(token, { type: "workout" }) : [];
       setLogs(data);
+      setError(token ? "" : "Log in to view workout logs.");
     } catch (err) {
       console.log("Error loading logs:", err);
+      setError(err.message || "Could not load workout logs.");
     }
   }
 
@@ -34,7 +37,7 @@ export default function WorkoutLogScreen() {
         </Text>
     {/* show message if no logs */}
         {logs.length === 0 && (
-          <Text style={{ marginTop: 10 }}>No logs yet</Text>
+          <Text style={{ marginTop: 10 }}>{error || "No logs yet"}</Text>
         )}
 
         {/* render logs */}

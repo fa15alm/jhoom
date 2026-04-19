@@ -99,6 +99,7 @@ for (const user_id of [1, 2]) {
 
  console.log("Database seeded successfully!");
 }
-seed();
-
-seed();
+seed().catch((err) => {
+  console.error("Error seeding database:", err);
+  process.exit(1);
+});

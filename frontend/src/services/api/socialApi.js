@@ -29,6 +29,12 @@ export function createPost(token, payload) {
   });
 }
 
+export function getSocialPost(token, postId) {
+  return apiRequest(`/social/posts/${postId}`, {
+    headers: getAuthHeaders(token),
+  });
+}
+
 export function addComment(token, postId, payload) {
   // Adds a comment to one post in the weekly feed.
   return apiRequest(`/social/posts/${postId}/comments`, {
@@ -62,10 +68,39 @@ export function sendFriendRequest(token, userId) {
   });
 }
 
+export function getConnections(token) {
+  return apiRequest("/social/friends", {
+    headers: getAuthHeaders(token),
+  });
+}
+
+export function respondToFriendRequest(token, userId, action) {
+  return apiRequest(`/social/friends/${userId}/respond`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+    body: JSON.stringify({ action }),
+  });
+}
+
 export function removeFriend(token, userId) {
   // Removes or cancels a friend relationship/request.
   return apiRequest(`/social/friends/${userId}`, {
     method: "DELETE",
     headers: getAuthHeaders(token),
+  });
+}
+
+export function blockUser(token, userId) {
+  return apiRequest(`/social/friends/${userId}/block`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+}
+
+export function reportContent(token, payload) {
+  return apiRequest("/social/reports", {
+    method: "POST",
+    headers: getAuthHeaders(token),
+    body: JSON.stringify(payload),
   });
 }

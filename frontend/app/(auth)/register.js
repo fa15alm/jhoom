@@ -2,9 +2,6 @@
  * Sign-up screen.
  *
  * This screen collects the minimum account details needed before onboarding.
- * It currently performs frontend validation only. Backend integration should
- * replace the final route change in `handleCompleteSignUp` with a call to
- * `authApi.registerUser`, then persist the returned session/user data.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -13,6 +10,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
+  Image,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -23,9 +22,71 @@ import {
   View,
 } from "react-native";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { registerUser } from "../../src/services/api/authApi";
+import { updateMyProfile } from "../../src/services/api/profileApi";
+import { uploadProfilePhoto } from "../../src/services/api/uploadApi";
+import { saveSession } from "../../src/services/authSession";
 
 const CARD_GAP = 18;
 const SHIMMER_TRAVEL = 220;
+const POLICY_COPY = {
+  terms: {
+    title: "Terms and Conditions",
+    sections: [
+      {
+        heading: "Using Jhoom",
+        body:
+          "You must provide accurate account information, keep your login secure, and use the app in a lawful way. Do not misuse the service, interfere with other users, or upload harmful content.",
+      },
+      {
+        heading: "Health Information",
+        body:
+          "Jhoom is for tracking and general wellbeing support. It does not replace medical advice, diagnosis, or treatment. You remain responsible for decisions you make about your health and training.",
+      },
+      {
+        heading: "Accounts and Content",
+        body:
+          "You are responsible for content you post, including profile photos, social posts, and comments. We may remove content or restrict accounts that violate safety, privacy, or abuse rules.",
+      },
+    ],
+  },
+  privacy: {
+    title: "Privacy Policy",
+    sections: [
+      {
+        heading: "What We Store",
+        body:
+          "We store the account details, profile information, logs, milestones, and social content needed to run the app. Uploaded images are stored so they can appear in your profile and feed.",
+      },
+      {
+        heading: "How It Is Used",
+        body:
+          "Your data is used to power features you choose to use, such as dashboards, milestones, and the friends feed. Privacy settings control what profile details other users can see.",
+      },
+      {
+        heading: "Your Control",
+        body:
+          "You can update your profile, adjust privacy settings, export your data, and delete your account. Only accepted friends can see friend-feed content that you share in the social section.",
+      },
+    ],
+  },
+};
+
+function getPasswordError(password) {
+  if (password.length < 6) {
+    return "Password must be at least 6 characters.";
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    return "Password must include at least 1 uppercase letter.";
+  }
+
+  if (!/\d/.test(password)) {
+    return "Password must include at least 1 number.";
+  }
+
+  return "";
+}
 
 export default function RegisterScreen() {
   const {
@@ -50,7 +111,14 @@ export default function RegisterScreen() {
     confirmPassword: "",
   });
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [viewedPolicies, setViewedPolicies] = useState({
+    terms: false,
+    privacy: false,
+  });
+  const [openPolicyKey, setOpenPolicyKey] = useState("");
   const [formError, setFormError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState(null);
 
   useEffect(() => {
     // Runs the same subtle shimmer used on the landing/auth primary buttons.
@@ -83,7 +151,69 @@ export default function RegisterScreen() {
     }
   }
 
-  function handleCompleteSignUp() {
+  function handleToggleTerms() {
+    if (!viewedPolicies.terms || !viewedPolicies.privacy) {
+      setFormError("Open both the terms and privacy policy before agreeing.");
+      return;
+    }
+
+    setAcceptedTerms((current) => !current);
+    setFormError("");
+  }
+
+  function handleOpenPolicy(policyKey) {
+    setViewedPolicies((current) => ({
+      ...current,
+      [policyKey]: true,
+    }));
+    setOpenPolicyKey(policyKey);
+    setFormError("");
+  }
+
+  function handleClosePolicy() {
+    setOpenPolicyKey("");
+  }
+
+  function handleSelectProfilePhoto() {
+    if (Platform.OS !== "web" || typeof document === "undefined") {
+      setFormError("Profile photo upload is available in the web app.");
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+
+    input.onchange = () => {
+      const file = input.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        setFormError("Choose an image file for your profile photo.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        setProfilePhoto({
+          name: file.name,
+          uri: reader.result,
+        });
+        setFormError("");
+      };
+      reader.onerror = () => {
+        setFormError("Could not read that image. Try a different photo.");
+      };
+      reader.readAsDataURL(file);
+    };
+
+    input.click();
+  }
+
+  async function handleCompleteSignUp() {
     // Keep validation close to the submit handler so it mirrors backend requirements.
     // The backend should enforce the same rules; frontend validation is only
     // for fast user feedback.
@@ -92,6 +222,7 @@ export default function RegisterScreen() {
     const password = form.password;
     const confirmPassword = form.confirmPassword;
     const isEmailValid = /\S+@\S+\.\S+/.test(email);
+    const passwordError = getPasswordError(password);
 
     if (!username || !email || !password || !confirmPassword) {
       setFormError("Fill in every field to complete sign up.");
@@ -103,8 +234,8 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (password.length < 8) {
-      setFormError("Password needs to be at least 8 characters.");
+    if (passwordError) {
+      setFormError(passwordError);
       return;
     }
 
@@ -113,22 +244,94 @@ export default function RegisterScreen() {
       return;
     }
 
+    if (!viewedPolicies.terms || !viewedPolicies.privacy) {
+      setFormError("Open the terms and privacy policy before continuing.");
+      return;
+    }
+
     if (!acceptedTerms) {
       setFormError("Agree to the terms and privacy policy to continue.");
       return;
     }
 
-    setFormError("");
-    // Temporary success path. Replace with registerUser(...) before routing.
-    router.replace("/(onboarding)/basic-info");
+    try {
+      setIsSubmitting(true);
+      let session = await registerUser({
+        username,
+        email: email.toLowerCase(),
+        password,
+      });
+      if (profilePhoto?.uri) {
+        const uploadedPhoto = await uploadProfilePhoto(session.token, {
+          dataUrl: profilePhoto.uri,
+          filename: profilePhoto.name,
+        });
+        const response = await updateMyProfile(session.token, {
+          profile_picture_url: uploadedPhoto.url,
+        });
+        session = {
+          ...session,
+          user: {
+            ...(session.user || {}),
+            profile_picture_url:
+              response.profile?.profile_picture_url || uploadedPhoto.url,
+          },
+        };
+      }
+      saveSession(session);
+      setFormError("");
+      router.replace("/(onboarding)/basic-info");
+    } catch (error) {
+      setFormError(error.message || "Could not create your account.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
     <SafeAreaView style={styles.container}>
+      <Modal
+        transparent
+        visible={Boolean(openPolicyKey)}
+        animationType="fade"
+        onRequestClose={handleClosePolicy}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {openPolicyKey ? POLICY_COPY[openPolicyKey].title : ""}
+            </Text>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {openPolicyKey
+                ? POLICY_COPY[openPolicyKey].sections.map((section) => (
+                    <View key={section.heading} style={styles.modalSection}>
+                      <Text style={styles.modalSectionHeading}>{section.heading}</Text>
+                      <Text style={styles.modalSectionBody}>{section.body}</Text>
+                    </View>
+                  ))
+                : null}
+            </ScrollView>
+            <Pressable
+              onPress={handleClosePolicy}
+              style={({ pressed }) => [
+                styles.modalButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.modalButtonText}>Done</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         bounces={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View
           style={[
@@ -205,6 +408,9 @@ export default function RegisterScreen() {
                         autoComplete="new-password"
                         textContentType="newPassword"
                       />
+                      <Text style={styles.helperText}>
+                        Use at least 6 characters, 1 uppercase letter, and 1 number.
+                      </Text>
                     </View>
 
                     <View style={[styles.fieldGroup, { width: formWidth }]}>
@@ -221,13 +427,42 @@ export default function RegisterScreen() {
                       />
                     </View>
 
+                    <View style={[styles.policyLinksRow, { width: formWidth }]}>
+                      <Pressable
+                        onPress={() => handleOpenPolicy("terms")}
+                        style={({ pressed }) => [
+                          styles.policyLinkButton,
+                          viewedPolicies.terms && styles.policyLinkButtonViewed,
+                          pressed && styles.buttonPressed,
+                        ]}
+                      >
+                        <Text style={styles.policyLinkText}>
+                          {viewedPolicies.terms ? "Viewed terms" : "View terms"}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleOpenPolicy("privacy")}
+                        style={({ pressed }) => [
+                          styles.policyLinkButton,
+                          viewedPolicies.privacy && styles.policyLinkButtonViewed,
+                          pressed && styles.buttonPressed,
+                        ]}
+                      >
+                        <Text style={styles.policyLinkText}>
+                          {viewedPolicies.privacy ? "Viewed privacy" : "View privacy"}
+                        </Text>
+                      </Pressable>
+                    </View>
+
                     <Pressable
-                      onPress={() => {
-                        setAcceptedTerms((current) => !current);
-                        setFormError("");
-                      }}
+                      accessibilityRole="checkbox"
+                      accessibilityLabel="Agree to the terms and privacy policy"
+                      accessibilityState={{ checked: acceptedTerms }}
+                      hitSlop={8}
+                      onPress={handleToggleTerms}
                       style={({ pressed }) => [
                         styles.termsRow,
+                        acceptedTerms && styles.termsRowSelected,
                         { width: formWidth },
                         pressed && styles.buttonPressed,
                       ]}
@@ -242,8 +477,15 @@ export default function RegisterScreen() {
                           <Ionicons name="checkmark-outline" size={14} color="#FFFFFF" />
                         ) : null}
                       </View>
-                      <Text style={styles.termsText}>
-                        I agree to the terms and privacy policy.
+                      <Text
+                        style={[
+                          styles.termsText,
+                          acceptedTerms && styles.termsTextSelected,
+                        ]}
+                      >
+                        {acceptedTerms
+                          ? "Agreed to the terms and privacy policy."
+                          : "I agree to the terms and privacy policy."}
                       </Text>
                     </Pressable>
 
@@ -258,19 +500,51 @@ export default function RegisterScreen() {
             </View>
 
             <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
-              <Pressable style={styles.uploadSection}>
-                <View style={styles.uploadCircle}>
-                  <Ionicons name="arrow-up-outline" size={24} color="#4EA955" />
+              <Pressable
+                onPress={handleSelectProfilePhoto}
+                style={({ pressed }) => [
+                  styles.uploadSection,
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.uploadCircle,
+                    profilePhoto && styles.uploadCircleSelected,
+                  ]}
+                >
+                  {profilePhoto?.uri ? (
+                    <Image
+                      source={{ uri: profilePhoto.uri }}
+                      style={styles.uploadPreviewImage}
+                    />
+                  ) : (
+                    <Ionicons name="arrow-up-outline" size={24} color="#4EA955" />
+                  )}
                 </View>
-                <Text style={styles.uploadText}>Upload profile photo</Text>
+                <Text style={styles.uploadText}>
+                  {profilePhoto ? "Profile photo selected" : "Upload profile photo"}
+                </Text>
+                {profilePhoto?.name ? (
+                  <Text style={styles.uploadFileName} numberOfLines={1}>
+                    {profilePhoto.name}
+                  </Text>
+                ) : null}
               </Pressable>
 
               <Pressable
                 onPress={handleCompleteSignUp}
+                disabled={
+                  isSubmitting ||
+                  !acceptedTerms ||
+                  !viewedPolicies.terms ||
+                  !viewedPolicies.privacy
+                }
                 style={({ pressed }) => [
                   styles.submitButton,
                   { width: formWidth },
-                  pressed && styles.buttonPressed,
+                  isSubmitting && styles.submitButtonDisabled,
+                  pressed && !isSubmitting && styles.buttonPressed,
                 ]}
               >
                 <View pointerEvents="none" style={styles.submitBackground}>
@@ -299,7 +573,7 @@ export default function RegisterScreen() {
                   </Animated.View>
                 </View>
                 <Text style={[styles.submitText, isCompactWidth && styles.compactSubmitText]}>
-                  Complete sign up
+                  {isSubmitting ? "Creating account..." : "Complete sign up"}
                 </Text>
               </Pressable>
 
@@ -353,16 +627,16 @@ const styles = StyleSheet.create({
     textShadowRadius: 14,
   },
   contentSection: {
-    flex: 1,
+    flexGrow: 0,
     justifyContent: "center",
     alignItems: "center",
   },
   contentStack: {
-    justifyContent: "flex-end",
+    justifyContent: "center",
     alignItems: "center",
   },
   formAnchor: {
-    justifyContent: "flex-end",
+    justifyContent: "center",
   },
   formSection: {
     gap: 16,
@@ -377,6 +651,12 @@ const styles = StyleSheet.create({
     color: "#111827",
     textTransform: "uppercase",
   },
+  helperText: {
+    fontSize: 10,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: "#5E6B7F",
+  },
   input: {
     height: 52,
     borderRadius: 14,
@@ -388,7 +668,7 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   termsRow: {
-    minHeight: 44,
+    minHeight: 50,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#CFEFD9",
@@ -397,6 +677,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
     paddingHorizontal: 14,
+  },
+  termsRowSelected: {
+    borderColor: "#4EA955",
+    backgroundColor: "#ECFDF3",
   },
   checkbox: {
     width: 22,
@@ -418,6 +702,35 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#62716A",
   },
+  termsTextSelected: {
+    color: "#315B36",
+  },
+  policyLinksRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  policyLinkButton: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  policyLinkButtonViewed: {
+    backgroundColor: "#ECFDF3",
+    borderColor: "#4EA955",
+  },
+  policyLinkText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#315B36",
+    textTransform: "uppercase",
+    textAlign: "center",
+  },
   errorText: {
     width: "100%",
     borderRadius: 16,
@@ -434,6 +747,7 @@ const styles = StyleSheet.create({
   uploadSection: {
     alignItems: "center",
     marginBottom: 20,
+    maxWidth: 240,
   },
   uploadCircle: {
     width: 56,
@@ -443,18 +757,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 10,
+    overflow: "hidden",
+  },
+  uploadCircleSelected: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 2,
+    borderColor: "#4EA955",
+  },
+  uploadPreviewImage: {
+    width: "100%",
+    height: "100%",
   },
   uploadText: {
     fontSize: 11,
     color: "#62716A",
     textTransform: "uppercase",
   },
+  uploadFileName: {
+    marginTop: 4,
+    maxWidth: 220,
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#4EA955",
+  },
   bottomSection: {
-    flex: 1,
+    flexGrow: 0,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 8,
-    paddingBottom: 14,
+    paddingTop: 22,
+    paddingBottom: 10,
     width: "100%",
   },
   compactBottomSection: {
@@ -468,6 +800,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     overflow: "hidden",
     position: "relative",
+  },
+  submitButtonDisabled: {
+    opacity: 0.72,
   },
   submitBackground: {
     ...StyleSheet.absoluteFillObject,
@@ -506,5 +841,61 @@ const styles = StyleSheet.create({
   buttonPressed: {
     opacity: 0.92,
     transform: [{ scale: 0.98 }],
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(17, 24, 39, 0.4)",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 32,
+  },
+  modalCard: {
+    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
+    padding: 18,
+    maxHeight: "82%",
+    borderWidth: 1,
+    borderColor: "#DDE5E0",
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 12,
+  },
+  modalScroll: {
+    flexGrow: 0,
+  },
+  modalScrollContent: {
+    gap: 14,
+    paddingBottom: 10,
+  },
+  modalSection: {
+    gap: 6,
+  },
+  modalSectionHeading: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#315B36",
+  },
+  modalSectionBody: {
+    fontSize: 12,
+    lineHeight: 19,
+    fontWeight: "600",
+    color: "#3F4858",
+  },
+  modalButton: {
+    minHeight: 46,
+    borderRadius: 999,
+    backgroundColor: "#4EA955",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 14,
+  },
+  modalButtonText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    textTransform: "uppercase",
   },
 });

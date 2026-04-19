@@ -3,12 +3,12 @@
  *
  * This is the main home screen after login. It presents current health metrics,
  * weekly/monthly progress graphs, plan summary text, and the shared bottom nav.
- * The screen currently uses a local dashboard source; backend wiring should
- * replace that source with logs, health integrations, milestones, and the AI plan.
+ * The screen loads the saved health plan and leaves metric aggregation ready
+ * for logs, integrations, and milestones.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -21,7 +21,14 @@ import {
 import AppHeader from "../src/shared/ui/AppHeader";
 import BottomNav from "../src/shared/ui/BottomNav";
 import useMobileFrame from "../src/shared/hooks/useMobileFrame";
-import { getPlanSummary } from "../src/features/health-plan/healthPlan";
+import { getPagedCarouselIndex } from "../src/shared/utils/carousel";
+import {
+  getPlanSummary,
+  saveGeneratedHealthPlan,
+} from "../src/features/health-plan/healthPlan";
+import { getHealthPlan } from "../src/services/api/healthPlanApi";
+import { getDashboardSummary } from "../src/services/api/dashboardApi";
+import { getAuthToken } from "../src/services/authSession";
 
 const BUTTON_GREEN = "#4EA955";
 const CARD_SPACING = 18;
@@ -34,13 +41,15 @@ const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const defaultDashboardSource = {
   streakCount: "1",
   caloriesBurned: "540 kcal",
-  sleepTime: "7h 48m",
-  steps: "8,214",
+  caloriesEaten: "1,860 kcal",
+  sleepTime: "7 h 48 min",
+  steps: "8,214 steps",
+  currentWeight: "78.4 kg",
   workoutsThisWeek: "4 done",
   tomorrowsWorkout: "Push day",
   tomorrowsFocus: "Chest + shoulders",
-  weeklyCaloriesTargetPerDay: 500,
-  weeklyStepsTargetPerDay: 8000,
+  weeklyCaloriesTarget: null,
+  weeklyStepsTarget: null,
   weeklyCaloriesBurned: [
     { day: "Mon", value: 420 },
     { day: "Tue", value: 510 },
@@ -67,6 +76,14 @@ const defaultDashboardSource = {
     { day: "Fri", value: 7.2 },
     { day: "Sat", value: 8.4 },
     { day: "Sun", value: 7.6 },
+  ],
+  weightProgressSeries: [
+    { label: "8 Apr", value: 81.2 },
+    { label: "10 Apr", value: 80.8 },
+    { label: "12 Apr", value: 80.5 },
+    { label: "14 Apr", value: 80.2 },
+    { label: "16 Apr", value: 79.9 },
+    { label: "18 Apr", value: 79.7 },
   ],
   monthlyWorkoutsCompleted: [
     { day: "1", value: 1 },
@@ -105,21 +122,45 @@ const defaultDashboardSource = {
 
 function formatHoursValue(value) {
   const hours = Number.isInteger(value) ? value.toString() : value.toFixed(1);
-  return `${hours}h`;
+  return `${hours} h`;
+}
+
+function formatKcalValue(value) {
+  return `${value} kcal`;
+}
+
+function formatStepsValue(value) {
+  return `${value.toLocaleString("en-GB")} steps`;
+}
+
+function formatWeightValue(value) {
+  return `${Number(value).toFixed(1)} kg`;
+}
+
+function buildWeightTrendSummary(series) {
+  if (!series.length) {
+    return "Log a weight check-in to start tracking progress.";
+  }
+
+  if (series.length === 1) {
+    return `Latest check-in on ${series[0].label}. Log again to see your trend.`;
+  }
+
+  const first = series[0];
+  const latest = series[series.length - 1];
+  const delta = Number((latest.value - first.value).toFixed(1));
+
+  if (delta === 0) {
+    return `No change since ${first.label}.`;
+  }
+
+  const direction = delta < 0 ? "Down" : "Up";
+  return `${direction} ${Math.abs(delta).toFixed(1)} kg since ${first.label}.`;
 }
 
 function buildDashboardViewModel(dataSources = {}) {
-  void dataSources;
-  // Keep dashboard mapping in one place so future API data does not leak into UI components.
-  // Backend data should be normalised here into simple slide objects before it
-  // reaches the chart/card components.
-  // Example future inputs:
-  // - userLogs
-  // - workoutPlan
-  // - completedWorkoutHistory
-  // - healthIntegrationSummary
-  // - weeklyHealthSeries
-  const source = { ...defaultDashboardSource };
+  // Keep dashboard mapping in one place so API data does not leak into UI components.
+  const source = { ...defaultDashboardSource, ...(dataSources.dashboardSummary || {}) };
 
   return {
     streakCount: source.streakCount,
@@ -141,6 +182,12 @@ function buildDashboardViewModel(dataSources = {}) {
             value: source.sleepTime,
           },
           {
+            id: "caloriesEaten",
+            label: "Calories eaten",
+            icon: "restaurant-outline",
+            value: source.caloriesEaten,
+          },
+          {
             id: "steps",
             label: "Steps",
             icon: "walk-outline",
@@ -153,16 +200,10 @@ function buildDashboardViewModel(dataSources = {}) {
             value: source.workoutsThisWeek,
           },
           {
-            id: "tomorrowsWorkout",
-            label: "Tomorrow's workout",
-            icon: "calendar-outline",
-            value: source.tomorrowsWorkout,
-          },
-          {
-            id: "tomorrowsFocus",
-            label: "Tomorrow's focus",
-            icon: "search-outline",
-            value: source.tomorrowsFocus,
+            id: "currentWeight",
+            label: "Current weight",
+            icon: "scale-outline",
+            value: source.currentWeight,
           },
         ],
       },
@@ -170,19 +211,17 @@ function buildDashboardViewModel(dataSources = {}) {
         id: "weekly-calories",
         kind: "chart",
         title: "Burned this week",
-        targetLabel: "AI target",
-        targetUnit: "/day",
         series: source.weeklyCaloriesBurned,
-        targetValue: source.weeklyCaloriesTargetPerDay,
+        target: source.weeklyCaloriesTarget,
+        formatValue: formatKcalValue,
       },
       {
         id: "weekly-steps",
         kind: "chart",
         title: "Steps this week",
-        targetLabel: "AI target",
-        targetUnit: "/day",
         series: source.weeklyStepsCompleted,
-        targetValue: source.weeklyStepsTargetPerDay,
+        target: source.weeklyStepsTarget,
+        formatValue: formatStepsValue,
       },
       {
         id: "weekly-sleep",
@@ -191,6 +230,14 @@ function buildDashboardViewModel(dataSources = {}) {
         series: source.weeklySleepTime,
         formatValue: formatHoursValue,
         titleOffset: 6,
+      },
+      {
+        id: "weight-progress",
+        kind: "weight-trend",
+        title: "Weight progress",
+        currentWeight: source.currentWeight,
+        series: source.weightProgressSeries,
+        summary: buildWeightTrendSummary(source.weightProgressSeries),
       },
       {
         id: "monthly-workouts",
@@ -320,8 +367,8 @@ function TodayPlanCard({ cardWidth, planSummary, onOpenAi }) {
 
 function QuickActions({ cardWidth, onOpenLog, onOpenAi }) {
   const actions = [
-    { label: "Log workout", icon: "barbell-outline", onPress: onOpenLog },
-    { label: "Log sleep", icon: "moon-outline", onPress: onOpenLog },
+    { label: "Log workout", icon: "barbell-outline", onPress: () => onOpenLog("workout") },
+    { label: "Log sleep", icon: "moon-outline", onPress: () => onOpenLog("sleep") },
     { label: "Ask AI", icon: "sparkles-outline", onPress: onOpenAi },
   ];
 
@@ -348,9 +395,10 @@ function WeeklyProgressChart({ item, cardWidth, graphWidth, compact }) {
   // Rendered with positioned views to avoid pulling in a charting dependency.
   const formatValue = item.formatValue ?? ((value) => value.toString());
   const weekToDateData = getWeekToDateSeries(item.series);
+  const targetLineValue = item.target?.lineValue ?? null;
   const maxValue = Math.max(
     ...weekToDateData.map((entry) => entry.value),
-    item.targetValue,
+    targetLineValue ?? 0,
     1,
   );
   const pointSpacing =
@@ -361,7 +409,9 @@ function WeeklyProgressChart({ item, cardWidth, graphWidth, compact }) {
     y: GRAPH_HEIGHT - (entry.value / maxValue) * GRAPH_HEIGHT,
   }));
   const completedPoints = points.filter((point) => !point.isFuture);
-  const targetY = GRAPH_HEIGHT - (item.targetValue / maxValue) * GRAPH_HEIGHT;
+  const targetY = targetLineValue != null
+    ? GRAPH_HEIGHT - (targetLineValue / maxValue) * GRAPH_HEIGHT
+    : null;
 
   return (
     <View style={[styles.chartCard, { width: cardWidth }]}>
@@ -369,24 +419,27 @@ function WeeklyProgressChart({ item, cardWidth, graphWidth, compact }) {
         <Text style={[styles.chartTitle, compact && styles.compactChartTitle]}>
           {item.title}
         </Text>
-        <View style={styles.targetBadge}>
-          <Text style={styles.targetBadgeLabel}>{item.targetLabel}</Text>
-          <Text style={styles.targetBadgeValue}>
-            {formatValue(item.targetValue)}
-            {item.targetUnit}
-          </Text>
-        </View>
+        {item.target ? (
+          <View style={styles.targetBadge}>
+            <Text style={styles.targetBadgeLabel}>{item.target.label}</Text>
+            <Text style={styles.targetBadgeValue}>{item.target.displayValue}</Text>
+          </View>
+        ) : (
+          <View style={styles.chartHeaderSpacer} />
+        )}
       </View>
 
       <View style={styles.graphWrapper}>
         <View style={[styles.graphSurface, { width: graphWidth }]}>
           <View style={styles.graphBaseline} />
-          <View
-            style={[
-              styles.targetLine,
-              { top: Math.max(0, Math.min(targetY, GRAPH_HEIGHT - 2)) },
-            ]}
-          />
+          {targetY != null ? (
+            <View
+              style={[
+                styles.targetLine,
+                { top: Math.max(0, Math.min(targetY, GRAPH_HEIGHT - 2)) },
+              ]}
+            />
+          ) : null}
 
           {completedPoints.slice(0, -1).map((point, index) => {
             const nextPoint = completedPoints[index + 1];
@@ -512,6 +565,109 @@ function ProgressBarChart({ item, cardWidth, compact }) {
   );
 }
 
+function WeightTrendCard({ item, cardWidth, graphWidth, compact }) {
+  const series = item.series || [];
+
+  if (!series.length) {
+    return (
+      <View style={[styles.chartCard, { width: cardWidth }]}>
+        <View style={styles.chartHeader}>
+          <Text style={[styles.chartTitle, compact && styles.compactChartTitle]}>
+            {item.title}
+          </Text>
+          <View style={styles.targetBadge}>
+            <Text style={styles.targetBadgeLabel}>Current</Text>
+            <Text style={styles.targetBadgeValue}>{item.currentWeight}</Text>
+          </View>
+        </View>
+        <View style={styles.weightEmptyState}>
+          <Text style={styles.weightTrendSummary}>{item.summary}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const values = series.map((entry) => entry.value);
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const padding = Math.max(0.5, Number(((maxValue - minValue) * 0.35).toFixed(1)));
+  const chartMin = Math.max(0, minValue - padding);
+  const chartMax = maxValue + padding;
+  const range = Math.max(chartMax - chartMin, 1);
+  const pointSpacing = series.length > 1 ? graphWidth / (series.length - 1) : 0;
+  const points = series.map((entry, index) => ({
+    ...entry,
+    x: index * pointSpacing,
+    y: GRAPH_HEIGHT - ((entry.value - chartMin) / range) * GRAPH_HEIGHT,
+  }));
+
+  return (
+    <View style={[styles.chartCard, { width: cardWidth }]}>
+      <View style={styles.chartHeader}>
+        <Text style={[styles.chartTitle, compact && styles.compactChartTitle]}>
+          {item.title}
+        </Text>
+        <View style={styles.targetBadge}>
+          <Text style={styles.targetBadgeLabel}>Current</Text>
+          <Text style={styles.targetBadgeValue}>{item.currentWeight}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.weightTrendSummary}>{item.summary}</Text>
+
+      <View style={styles.graphWrapper}>
+        <View style={[styles.graphSurface, { width: graphWidth }]}>
+          <View style={styles.graphBaseline} />
+
+          {points.slice(0, -1).map((point, index) => {
+            const nextPoint = points[index + 1];
+            const dx = nextPoint.x - point.x;
+            const dy = nextPoint.y - point.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const angle = `${(Math.atan2(dy, dx) * 180) / Math.PI}deg`;
+
+            return (
+              <View
+                key={`${point.label}-${nextPoint.label}`}
+                style={[
+                  styles.graphSegment,
+                  {
+                    width: length,
+                    left: (point.x + nextPoint.x) / 2 - length / 2,
+                    top: (point.y + nextPoint.y) / 2,
+                    transform: [{ rotate: angle }],
+                  },
+                ]}
+              />
+            );
+          })}
+
+          {points.map((point) => (
+            <View
+              key={point.label}
+              style={[
+                styles.graphPointWrap,
+                { left: point.x - 18, top: point.y - 36, width: 36 },
+              ]}
+            >
+              <Text style={styles.barValue}>{formatWeightValue(point.value)}</Text>
+              <View style={styles.graphPoint} />
+            </View>
+          ))}
+        </View>
+
+        <View style={[styles.graphLabelsRow, { width: graphWidth }]}>
+          {points.map((entry) => (
+            <Text key={entry.label} style={[styles.barLabel, styles.weightDateLabel]}>
+              {entry.label}
+            </Text>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function MonthlyWorkoutCalendarCard({ item, cardWidth, compact }) {
   const { monthLabel, cells } = getCurrentMonthCalendarData(item.series);
 
@@ -585,8 +741,10 @@ export default function DashboardScreen() {
     cardWidth,
   } = useMobileFrame();
   const [activeMetricIndex, setActiveMetricIndex] = useState(0);
+  const [planVersion, setPlanVersion] = useState(0);
+  const [dashboardSummary, setDashboardSummary] = useState(null);
   const metricsListRef = useRef(null);
-  const dashboardView = buildDashboardViewModel();
+  const dashboardView = buildDashboardViewModel({ dashboardSummary });
   const planSummary = getPlanSummary();
   const graphWidth = Math.max(cardWidth - 36, 220);
   const viewabilityConfig = useRef({
@@ -599,8 +757,58 @@ export default function DashboardScreen() {
     }
   }).current;
 
-  function handleMetricPress() {
-    router.push("/log");
+  function handleMetricsScroll(event) {
+    setActiveMetricIndex(
+      getPagedCarouselIndex(event, sliderWidth, dashboardView.slides.length),
+    );
+  }
+
+  useEffect(() => {
+    async function loadPlan() {
+      const token = getAuthToken();
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        const [healthPlan, summary] = await Promise.all([
+          getHealthPlan(token).catch(() => null),
+          getDashboardSummary(token).catch(() => null),
+        ]);
+        saveGeneratedHealthPlan(healthPlan);
+        setDashboardSummary(summary);
+        setPlanVersion((current) => current + 1);
+      } catch {
+        saveGeneratedHealthPlan(null);
+      }
+    }
+
+    loadPlan();
+  }, []);
+
+  void planVersion;
+
+  function openLogScreen(typeKey = "workout") {
+    router.push({
+      pathname: "/log",
+      params: { type: typeKey },
+    });
+  }
+
+  function handleMetricPress(metric) {
+    const typeByMetric = {
+      caloriesBurned: "caloriesBurned",
+      caloriesEaten: "nutrition",
+      sleepTime: "sleep",
+      steps: "steps",
+      currentWeight: "weight",
+      workoutsThisWeek: "workout",
+      tomorrowsWorkout: "workout",
+      tomorrowsFocus: "workout",
+    };
+
+    openLogScreen(typeByMetric[metric.id] || "workout");
   }
 
   return (
@@ -649,7 +857,7 @@ export default function DashboardScreen() {
 
               <QuickActions
                 cardWidth={cardWidth}
-                onOpenLog={() => router.push("/log")}
+                onOpenLog={openLogScreen}
                 onOpenAi={() => router.push("/ai")}
               />
 
@@ -694,6 +902,17 @@ export default function DashboardScreen() {
                     );
                   }
 
+                  if (item.kind === "weight-trend") {
+                    return (
+                      <WeightTrendCard
+                        item={item}
+                        cardWidth={cardWidth}
+                        graphWidth={graphWidth}
+                        compact={isCompactWidth}
+                      />
+                    );
+                  }
+
                   return (
                     <MetricsCard
                       item={item}
@@ -703,7 +922,10 @@ export default function DashboardScreen() {
                     />
                   );
                 }}
+                onScroll={handleMetricsScroll}
+                onMomentumScrollEnd={handleMetricsScroll}
                 onViewableItemsChanged={onViewableItemsChanged}
+                scrollEventThrottle={16}
                 viewabilityConfig={viewabilityConfig}
               />
 
@@ -893,6 +1115,19 @@ const styles = StyleSheet.create({
     width: 78,
     height: 1,
   },
+  weightTrendSummary: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: "#5E6B7F",
+    marginBottom: 16,
+  },
+  weightEmptyState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
   targetBadge: {
     borderRadius: 20,
     backgroundColor: "#FFFFFF",
@@ -1038,6 +1273,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#7A8699",
     textTransform: "uppercase",
+  },
+  weightDateLabel: {
+    width: 40,
+    textAlign: "center",
+    textTransform: "none",
+    fontSize: 9,
   },
   barLabelFuture: {
     color: "#AAB4C3",

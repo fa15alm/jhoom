@@ -14,4 +14,4 @@ The `app/` folder is reserved for Expo Router routes. Shared code and feature lo
 
 Screens should not call `fetch` directly. Add backend calls to `services/api/`, then use those functions from feature modules or screens.
 
-Set `EXPO_PUBLIC_API_URL` in `.env` when the backend host changes. The local default is `http://localhost:5000/api`, which matches the Express server in this repo.
+Set `EXPO_PUBLIC_API_URL` in `.env` when the backend host changes. On web, leave it unset for local development so the app can use the current browser hostname with port `5001`.
