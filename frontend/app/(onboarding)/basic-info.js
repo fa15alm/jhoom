@@ -1,10 +1,7 @@
 /*
  * Onboarding carousel.
  *
- * Collects the answers needed to generate a custom health plan. For now the
- * answers are saved into the temporary frontend health-plan store. When the
- * backend is connected, submit these answers to `healthPlanApi.generateHealthPlan`
- * and store the generated plan returned by the server.
+ * Collects the answers needed to generate and persist a custom health plan.
  */
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -23,15 +20,109 @@ import {
   View,
 } from "react-native";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { getPagedCarouselIndex } from "../../src/shared/utils/carousel";
 import {
   getDefaultOnboardingAnswers,
+  saveGeneratedHealthPlan,
   saveOnboardingAnswers,
 } from "../../src/features/health-plan/healthPlan";
+import { generateHealthPlan } from "../../src/services/api/healthPlanApi";
+import { updateMyProfile } from "../../src/services/api/profileApi";
+import { getAuthToken } from "../../src/services/authSession";
 
 const CARD_SPACING = 18;
 const SHIMMER_TRAVEL = 220;
 const ADDITIONAL_GOALS_LIMIT = 240;
 const LIMITATIONS_LIMIT = 180;
+
+function formatDateInput(value) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 8);
+  const parts = [];
+
+  if (digits.length > 0) {
+    parts.push(digits.slice(0, 2));
+  }
+
+  if (digits.length > 2) {
+    parts.push(digits.slice(2, 4));
+  }
+
+  if (digits.length > 4) {
+    parts.push(digits.slice(4, 8));
+  }
+
+  return parts.join("/");
+}
+
+function formatMetricInput(value) {
+  const cleaned = String(value || "").replace(/[^0-9.]/g, "");
+  const [wholePart = "", ...decimalParts] = cleaned.split(".");
+  const boundedWholePart = wholePart.slice(0, 3);
+
+  if (decimalParts.length === 0) {
+    return boundedWholePart;
+  }
+
+  return `${boundedWholePart}.${decimalParts.join("").slice(0, 1)}`;
+}
+
+function validateDateOfBirth(value) {
+  if (!value) {
+    return "Enter your date of birth as DD/MM/YYYY.";
+  }
+
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    return "Use the format DD/MM/YYYY.";
+  }
+
+  const [dayText, monthText, yearText] = value.split("/");
+  const day = Number(dayText);
+  const month = Number(monthText);
+  const year = Number(yearText);
+  const candidate = new Date(year, month - 1, day);
+
+  if (
+    candidate.getFullYear() !== year ||
+    candidate.getMonth() !== month - 1 ||
+    candidate.getDate() !== day
+  ) {
+    return "Enter a real calendar date.";
+  }
+
+  const now = new Date();
+
+  if (candidate > now) {
+    return "Date of birth cannot be in the future.";
+  }
+
+  return "";
+}
+
+function validateMeasurement(value, label, min, max) {
+  if (!value) {
+    return `Enter your ${label}.`;
+  }
+
+  if (!/^\d{1,3}(\.\d)?$/.test(value)) {
+    return `Use numbers only for ${label}.`;
+  }
+
+  const numericValue = Number(value);
+
+  if (numericValue < min || numericValue > max) {
+    return `${label.charAt(0).toUpperCase() + label.slice(1)} must be between ${min} and ${max}.`;
+  }
+
+  return "";
+}
+
+function getBasicInfoErrors(basicInfo) {
+  return {
+    dateOfBirth: validateDateOfBirth(basicInfo.dateOfBirth),
+    height: validateMeasurement(basicInfo.height, "height", 50, 300),
+    weight: validateMeasurement(basicInfo.weight, "weight", 20, 400),
+  };
+}
 
 // Each slide describes either an intro card, input card, choice card, or text card.
 // The carousel is intentionally config-driven so new onboarding questions can
@@ -213,6 +304,7 @@ function ActionButton({ label, onPress, disabled = false, compact = false }) {
 function FeatureCard({
   item,
   basicInfo,
+  basicInfoErrors,
   planDetails,
   onChangeBasicInfo,
   onChangePlanDetail,
@@ -242,30 +334,54 @@ function FeatureCard({
         </Text>
 
         <View style={styles.basicInfoForm}>
+          <Text style={styles.fieldHelper}>Date of birth: DD/MM/YYYY</Text>
           <TextInput
             value={basicInfo.dateOfBirth}
             onChangeText={(value) => onChangeBasicInfo("dateOfBirth", value)}
             placeholder="DD/MM/YYYY"
             placeholderTextColor="#7A8699"
-            style={styles.basicInfoInput}
+            style={[
+              styles.basicInfoInput,
+              basicInfoErrors.dateOfBirth && styles.basicInfoInputError,
+            ]}
             keyboardType="numbers-and-punctuation"
+            maxLength={10}
           />
+          {basicInfoErrors.dateOfBirth ? (
+            <Text style={styles.inputErrorText}>{basicInfoErrors.dateOfBirth}</Text>
+          ) : null}
+          <Text style={styles.fieldHelper}>Height in centimetres, for example 172 or 172.5</Text>
           <TextInput
             value={basicInfo.height}
             onChangeText={(value) => onChangeBasicInfo("height", value)}
-            placeholder="Height"
+            placeholder="Height (cm)"
             placeholderTextColor="#7A8699"
-            style={styles.basicInfoInput}
+            style={[
+              styles.basicInfoInput,
+              basicInfoErrors.height && styles.basicInfoInputError,
+            ]}
             keyboardType="numeric"
+            maxLength={5}
           />
+          {basicInfoErrors.height ? (
+            <Text style={styles.inputErrorText}>{basicInfoErrors.height}</Text>
+          ) : null}
+          <Text style={styles.fieldHelper}>Weight in kilograms, for example 70 or 70.5</Text>
           <TextInput
             value={basicInfo.weight}
             onChangeText={(value) => onChangeBasicInfo("weight", value)}
-            placeholder="Weight"
+            placeholder="Weight (kg)"
             placeholderTextColor="#7A8699"
-            style={styles.basicInfoInput}
+            style={[
+              styles.basicInfoInput,
+              basicInfoErrors.weight && styles.basicInfoInputError,
+            ]}
             keyboardType="numeric"
+            maxLength={5}
           />
+          {basicInfoErrors.weight ? (
+            <Text style={styles.inputErrorText}>{basicInfoErrors.weight}</Text>
+          ) : null}
         </View>
       </View>
     );
@@ -387,6 +503,8 @@ export default function OnboardingScreen() {
     sleepGoal: defaultAnswers.sleepGoal,
     additionalGoals: defaultAnswers.additionalGoals,
   });
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const listRef = useRef(null);
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
@@ -396,6 +514,7 @@ export default function OnboardingScreen() {
     ...basicInfo,
     ...planDetails,
   };
+  const basicInfoErrors = getBasicInfoErrors(basicInfo);
   const requiredFields = [
     // These fields are the minimum needed before a generated plan makes sense.
     ["dateOfBirth", "date of birth"],
@@ -410,35 +529,94 @@ export default function OnboardingScreen() {
   const missingRequiredFields = requiredFields
     .filter(([key]) => !planAnswers[key]?.trim())
     .map(([, label]) => label);
-  const isOnboardingComplete = missingRequiredFields.length === 0;
+  const invalidRequiredFields = [
+    ["dateOfBirth", "date of birth", basicInfoErrors.dateOfBirth],
+    ["height", "height", basicInfoErrors.height],
+    ["weight", "weight", basicInfoErrors.weight],
+  ]
+    .filter(([, , error]) => Boolean(error))
+    .map(([, label]) => label);
+  const isOnboardingComplete =
+    missingRequiredFields.length === 0 && invalidRequiredFields.length === 0;
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (viewableItems.length > 0 && viewableItems[0]?.index != null) {
       setActiveIndex(viewableItems[0].index);
     }
   }).current;
 
+  function handleCarouselScroll(event) {
+    setActiveIndex(getPagedCarouselIndex(event, sliderWidth, slides.length));
+  }
+
   function handleBasicInfoChange(field, value) {
+    let nextValue = value;
+
+    if (field === "dateOfBirth") {
+      nextValue = formatDateInput(value);
+    }
+
+    if (field === "height" || field === "weight") {
+      nextValue = formatMetricInput(value);
+    }
+
+    setSubmitError("");
     setBasicInfo((current) => ({
       ...current,
-      [field]: value,
+      [field]: nextValue,
     }));
   }
 
   function handlePlanDetailChange(field, value) {
+    setSubmitError("");
     setPlanDetails((current) => ({
       ...current,
       [field]: value,
     }));
   }
 
-  function handleGeneratePlan() {
+  async function handleGeneratePlan() {
     if (!isOnboardingComplete) {
+      if (missingRequiredFields.length > 0) {
+        setSubmitError(`Add ${missingRequiredFields[0]} before generating your plan.`);
+        return;
+      }
+
+      if (invalidRequiredFields.length > 0) {
+        setSubmitError(`Check the format for ${invalidRequiredFields[0]} before generating your plan.`);
+        return;
+      }
+
+      setSubmitError("Finish the required onboarding questions before generating your plan.");
       return;
     }
 
-    // Stored locally for now; this should become healthPlanApi.generateHealthPlan.
-    saveOnboardingAnswers(planAnswers);
-    router.replace("/dashboard");
+    const token = getAuthToken();
+
+    if (!token) {
+      setSubmitError("Log in again before generating your plan.");
+      router.replace("/(auth)/login");
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const healthPlan = await generateHealthPlan(token, planAnswers);
+      saveGeneratedHealthPlan(healthPlan);
+
+      await updateMyProfile(token, {
+        date_of_birth: basicInfo.dateOfBirth,
+        height_cm: basicInfo.height ? Number(basicInfo.height) : null,
+        weight_kg: basicInfo.weight ? Number(basicInfo.weight) : null,
+      }).catch(() => null);
+
+      setSubmitError("");
+      router.replace("/dashboard");
+    } catch (error) {
+      saveOnboardingAnswers(planAnswers);
+      setSubmitError(error.message || "Could not generate your plan yet.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -486,6 +664,7 @@ export default function OnboardingScreen() {
                   <FeatureCard
                     item={item}
                     basicInfo={basicInfo}
+                    basicInfoErrors={basicInfoErrors}
                     planDetails={planDetails}
                     onChangeBasicInfo={handleBasicInfoChange}
                     onChangePlanDetail={handlePlanDetailChange}
@@ -494,7 +673,10 @@ export default function OnboardingScreen() {
                     short={isShortHeight}
                   />
                 )}
+                onScroll={handleCarouselScroll}
+                onMomentumScrollEnd={handleCarouselScroll}
                 onViewableItemsChanged={onViewableItemsChanged}
+                scrollEventThrottle={16}
                 viewabilityConfig={viewabilityConfig}
               />
 
@@ -510,11 +692,16 @@ export default function OnboardingScreen() {
 
             <View style={[styles.bottomSection, isCompactWidth && styles.compactBottomSection]}>
               <ActionButton
-                label="Generate custom plan"
-                disabled={!isLastSlide || !isOnboardingComplete}
+                label={isSubmitting ? "Generating..." : "Generate custom plan"}
+                disabled={!isLastSlide || !isOnboardingComplete || isSubmitting}
                 onPress={handleGeneratePlan}
                 compact={isCompactWidth}
               />
+              {submitError ? (
+                <Text accessibilityRole="alert" style={styles.submitErrorText}>
+                  {submitError}
+                </Text>
+              ) : null}
             </View>
           </View>
         </View>
@@ -648,6 +835,25 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 12,
   },
+  basicInfoInputError: {
+    borderColor: "#F87171",
+    backgroundColor: "#FEF2F2",
+  },
+  fieldHelper: {
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: "700",
+    color: "#5E6B7F",
+    marginBottom: 6,
+  },
+  inputErrorText: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#B91C1C",
+    marginTop: -4,
+    marginBottom: 10,
+  },
   goalsInput: {
     minHeight: 120,
     paddingTop: 16,
@@ -714,6 +920,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingBottom: 14,
     width: "100%",
+  },
+  submitErrorText: {
+    marginTop: 10,
+    maxWidth: 280,
+    color: "#B91C1C",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    textAlign: "center",
   },
   compactBottomSection: {
     paddingHorizontal: 0,

@@ -1,14 +1,11 @@
 /*
  * AI health coach screen.
  *
- * Shows the current plan above a chat-style question box. The chat currently
- * creates a temporary local response so the interface is usable before AI
- * backend work exists. Replace the timeout in `handleSendQuestion` with
- * `coachApi.askHealthCoach` and include plan/log context in the request body.
+ * Shows the current plan above a chat-style question box backed by the coach API.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Pressable,
   SafeAreaView,
@@ -21,7 +18,14 @@ import {
 import AppHeader from "../src/shared/ui/AppHeader";
 import BottomNav from "../src/shared/ui/BottomNav";
 import useMobileFrame from "../src/shared/hooks/useMobileFrame";
-import { getCurrentPlanSections, getPlanSummary } from "../src/features/health-plan/healthPlan";
+import {
+  getCurrentPlanSections,
+  getPlanSummary,
+  saveGeneratedHealthPlan,
+} from "../src/features/health-plan/healthPlan";
+import { askHealthCoach } from "../src/services/api/coachApi";
+import { getHealthPlan } from "../src/services/api/healthPlanApi";
+import { getAuthToken } from "../src/services/authSession";
 
 const promptSuggestions = [
   "Adjust today",
@@ -54,8 +58,30 @@ export default function AiScreen() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState(starterMessages);
   const [isThinking, setIsThinking] = useState(false);
+  const [planVersion, setPlanVersion] = useState(0);
   const planSections = getCurrentPlanSections();
   const planSummary = getPlanSummary();
+
+  useEffect(() => {
+    async function loadPlan() {
+      const token = getAuthToken();
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        saveGeneratedHealthPlan(await getHealthPlan(token));
+        setPlanVersion((current) => current + 1);
+      } catch {
+        saveGeneratedHealthPlan(null);
+      }
+    }
+
+    loadPlan();
+  }, []);
+
+  void planVersion;
 
   function handleSuggestionPress(suggestion) {
     // Suggestion chips prefill the composer instead of sending immediately,
@@ -63,9 +89,7 @@ export default function AiScreen() {
     setQuestion(suggestion);
   }
 
-  function handleSendQuestion() {
-    // Simulates the request/response shape that coachApi.askHealthCoach will use later.
-    // Keep this shape similar to the backend payload to make the swap small.
+  async function handleSendQuestion() {
     const trimmedQuestion = question.trim();
 
     if (!trimmedQuestion) {
@@ -85,18 +109,37 @@ export default function AiScreen() {
     setIsThinking(true);
     setQuestion("");
 
-    setTimeout(() => {
-      // Temporary response keeps the chat usable until the backend AI endpoint exists.
+    try {
+      const token = getAuthToken();
+      const answer = token
+        ? await askHealthCoach(token, {
+            message: trimmedQuestion,
+            plan: planSections,
+          })
+        : null;
+
       setMessages((current) => [
         ...current,
         {
           id: `coach-${timestamp}`,
           role: "coach",
-          text: `Based on your current plan (${planSummary.title}), I would keep this simple: choose one action for today, log the result, then adjust the next session from your recovery and energy notes. The live AI response will plug in here later.`,
+          text:
+            answer?.response ||
+            `Based on your current plan (${planSummary.title}), choose one action for today, log the result, then adjust from your recovery notes.`,
         },
       ]);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `coach-${timestamp}`,
+          role: "coach",
+          text: error.message || "I could not reach the coach API. Try again in a moment.",
+        },
+      ]);
+    } finally {
       setIsThinking(false);
-    }, 450);
+    }
   }
 
   function handleClearChat() {

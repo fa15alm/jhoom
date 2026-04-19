@@ -24,6 +24,7 @@ const defaultOnboardingAnswers = {
 // Module-level state keeps the generated plan available across screens during one app session.
 // This is not permanent storage; it resets when the app reloads.
 let storedOnboardingAnswers = { ...defaultOnboardingAnswers };
+let storedGeneratedPlan = null;
 
 export function getDefaultOnboardingAnswers() {
   // Return a copy so screens cannot accidentally mutate the source defaults.
@@ -38,6 +39,20 @@ export function saveOnboardingAnswers(answers) {
   };
 }
 
+export function saveGeneratedHealthPlan(healthPlan) {
+  if (!healthPlan) {
+    storedGeneratedPlan = null;
+    return;
+  }
+
+  storedGeneratedPlan = healthPlan;
+  saveOnboardingAnswers(healthPlan.answers ?? {});
+}
+
+export function getGeneratedHealthPlan() {
+  return storedGeneratedPlan;
+}
+
 export function getOnboardingAnswers() {
   // Return a copy so callers can read safely without changing module state.
   return { ...storedOnboardingAnswers };
@@ -49,6 +64,10 @@ export function hasGeneratedPlan() {
 }
 
 export function buildPlanPreview(answers = storedOnboardingAnswers) {
+  if (storedGeneratedPlan?.plan?.sections) {
+    return storedGeneratedPlan.plan.sections;
+  }
+
   // The preview turns raw onboarding answers into simple user-facing plan sections.
   // Backend AI output can replace this deterministic copy later.
   const goal = answers.goal || "Build a balanced routine";
@@ -75,6 +94,10 @@ export function buildPlanPreview(answers = storedOnboardingAnswers) {
 }
 
 export function getCurrentPlanSections() {
+  if (storedGeneratedPlan?.plan?.sections) {
+    return storedGeneratedPlan.plan.sections;
+  }
+
   const answers = getOnboardingAnswers();
 
   // If onboarding has not run yet, return a helpful empty-plan state.
@@ -113,6 +136,13 @@ export function getCurrentPlanSections() {
 }
 
 export function getPlanSummary() {
+  if (storedGeneratedPlan?.plan) {
+    return {
+      title: storedGeneratedPlan.plan.title || "Custom plan",
+      detail: storedGeneratedPlan.plan.summary || "Generated from onboarding and logs.",
+    };
+  }
+
   const answers = getOnboardingAnswers();
 
   // Dashboard/AI use this compact summary rather than duplicating plan text.

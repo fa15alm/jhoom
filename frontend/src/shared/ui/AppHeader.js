@@ -7,13 +7,22 @@
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { resolveApiAssetUrl } from "../../services/api/client";
+import { getCurrentUser, subscribeToSession } from "../../services/authSession";
 
 const BUTTON_GREEN = "#4EA955";
 
-function HeaderIconButton({ icon, onPress, accessibilityLabel }) {
+function HeaderIconButton({ icon, imageUri, onPress, accessibilityLabel }) {
   // Small circular icon button reused by both sides of the header.
   // Keeping this private prevents each screen from duplicating header button styling.
+  const [hasImageError, setHasImageError] = useState(false);
+
+  useEffect(() => {
+    setHasImageError(false);
+  }, [imageUri]);
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -24,7 +33,15 @@ function HeaderIconButton({ icon, onPress, accessibilityLabel }) {
         pressed && styles.headerButtonPressed,
       ]}
     >
-      <Ionicons name={icon} size={18} color="#FFFFFF" />
+      {imageUri && !hasImageError ? (
+        <Image
+          source={{ uri: imageUri }}
+          style={styles.headerAvatarImage}
+          onError={() => setHasImageError(true)}
+        />
+      ) : (
+        <Ionicons name={icon} size={18} color="#FFFFFF" />
+      )}
     </Pressable>
   );
 }
@@ -42,6 +59,13 @@ export default function AppHeader({
   onRightPress,
 }) {
   const router = useRouter();
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUser());
+  const headerPhotoUri = currentUser?.profile_picture_preview_url
+    || resolveApiAssetUrl(currentUser?.profile_picture_url);
+
+  useEffect(() => subscribeToSession((session) => {
+    setCurrentUser(session?.user ?? null);
+  }), []);
 
   // If a screen does not provide custom handlers, the header navigates to default routes.
   // This keeps common screens simple while still allowing custom search/settings actions.
@@ -50,6 +74,7 @@ export default function AppHeader({
       <View style={styles.leftGroup}>
         <HeaderIconButton
           icon={leftIcon}
+          imageUri={headerPhotoUri}
           accessibilityLabel={leftAccessibilityLabel}
           onPress={onLeftPress ?? (() => router.push(leftHref))}
         />
@@ -110,6 +135,11 @@ const styles = StyleSheet.create({
   headerButtonPressed: {
     opacity: 0.92,
     transform: [{ scale: 0.98 }],
+  },
+  headerAvatarImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 999,
   },
   title: {
     fontSize: 12,

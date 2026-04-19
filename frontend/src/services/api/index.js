@@ -5,9 +5,12 @@
  * avoids long import paths and keeps new API modules discoverable.
  */
 export * from "./authApi";
+export * from "./accountApi";
 export * from "./coachApi";
+export * from "./dashboardApi";
 export * from "./healthPlanApi";
 export * from "./logsApi";
 export * from "./milestonesApi";
 export * from "./profileApi";
 export * from "./socialApi";
+export * from "./uploadApi";

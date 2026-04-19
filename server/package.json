@@ -1,4 +1,10 @@
 {
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "setup-db": "node src/db/setupDb.js",
+    "seed": "node src/db/seedDb.js"
+  },
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",

@@ -3,11 +3,11 @@
  *
  * Lets users create, edit, delete, and review daily health logs. The form is
  * driven by `LOG_TYPES`, so adding a new metric type mostly means adding a new
- * definition below. At backend time, replace the local `logs` state with
- * `logsApi.getLogs/createLog/updateLog/deleteLog`.
+ * definition below.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useState } from "react";
+import { useLocalSearchParams } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   Pressable,
   SafeAreaView,
@@ -20,6 +20,13 @@ import {
 import AppHeader from "../src/shared/ui/AppHeader";
 import BottomNav from "../src/shared/ui/BottomNav";
 import useMobileFrame from "../src/shared/hooks/useMobileFrame";
+import {
+  createLog,
+  deleteLog,
+  getLogs,
+  updateLog,
+} from "../src/services/api/logsApi";
+import { getAuthToken } from "../src/services/authSession";
 
 const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -33,7 +40,7 @@ const LOG_TYPES = [
     fields: [
       { key: "sets", label: "Sets", placeholder: "Sets...", keyboardType: "number-pad" },
       { key: "reps", label: "Reps", placeholder: "Reps...", keyboardType: "number-pad" },
-      { key: "weight", label: "Weight", placeholder: "Weight...", keyboardType: "decimal-pad" },
+      { key: "weight", label: "Weight (kg)", placeholder: "Weight in kg...", keyboardType: "decimal-pad", unit: "kg" },
     ],
   },
   {
@@ -41,9 +48,9 @@ const LOG_TYPES = [
     label: "Cardio session",
     namePlaceholder: "Log name",
     fields: [
-      { key: "duration", label: "Duration", placeholder: "Minutes...", keyboardType: "number-pad" },
-      { key: "distance", label: "Distance", placeholder: "Distance...", keyboardType: "decimal-pad" },
-      { key: "calories", label: "Calories", placeholder: "Calories...", keyboardType: "number-pad" },
+      { key: "duration", label: "Duration (min)", placeholder: "Duration in minutes...", keyboardType: "number-pad", unit: "min" },
+      { key: "distance", label: "Distance (km)", placeholder: "Distance in km...", keyboardType: "decimal-pad", unit: "km" },
+      { key: "calories", label: "Calories (kcal)", placeholder: "Calories in kcal...", keyboardType: "number-pad", unit: "kcal" },
     ],
   },
   {
@@ -51,9 +58,9 @@ const LOG_TYPES = [
     label: "Nutrition",
     namePlaceholder: "Log name",
     fields: [
-      { key: "calories", label: "Calories", placeholder: "Calories...", keyboardType: "number-pad" },
-      { key: "protein", label: "Protein", placeholder: "Protein...", keyboardType: "decimal-pad" },
-      { key: "carbs", label: "Carbs", placeholder: "Carbs...", keyboardType: "decimal-pad" },
+      { key: "calories", label: "Calories (kcal)", placeholder: "Calories in kcal...", keyboardType: "number-pad", unit: "kcal" },
+      { key: "protein", label: "Protein (g)", placeholder: "Protein in g...", keyboardType: "decimal-pad", unit: "g" },
+      { key: "carbs", label: "Carbs (g)", placeholder: "Carbs in g...", keyboardType: "decimal-pad", unit: "g" },
     ],
   },
   {
@@ -61,9 +68,9 @@ const LOG_TYPES = [
     label: "Calories burned",
     namePlaceholder: "Log name",
     fields: [
-      { key: "calories", label: "Calories", placeholder: "Calories burned...", keyboardType: "number-pad" },
+      { key: "calories", label: "Calories burned (kcal)", placeholder: "Calories burned in kcal...", keyboardType: "number-pad", unit: "kcal" },
       { key: "source", label: "Source", placeholder: "Source eg workout, walk...", keyboardType: "default" },
-      { key: "duration", label: "Duration", placeholder: "Minutes...", keyboardType: "number-pad" },
+      { key: "duration", label: "Duration (min)", placeholder: "Duration in minutes...", keyboardType: "number-pad", unit: "min" },
     ],
   },
   {
@@ -71,9 +78,9 @@ const LOG_TYPES = [
     label: "Sleep",
     namePlaceholder: "Log name",
     fields: [
-      { key: "hours", label: "Hours", placeholder: "Hours...", keyboardType: "decimal-pad" },
-      { key: "bedtime", label: "Bedtime", placeholder: "Bedtime...", keyboardType: "numbers-and-punctuation" },
-      { key: "wakeTime", label: "Wake time", placeholder: "Wake time...", keyboardType: "numbers-and-punctuation" },
+      { key: "hours", label: "Sleep duration", placeholder: "", keyboardType: "decimal-pad", unit: "h", computed: true },
+      { key: "bedtime", label: "Bedtime (24h)", placeholder: "Bedtime eg 23:00...", keyboardType: "numbers-and-punctuation" },
+      { key: "wakeTime", label: "Wake time (24h)", placeholder: "Wake time eg 07:00...", keyboardType: "numbers-and-punctuation" },
     ],
   },
   {
@@ -82,8 +89,16 @@ const LOG_TYPES = [
     namePlaceholder: "Log name",
     fields: [
       { key: "steps", label: "Steps", placeholder: "Steps...", keyboardType: "number-pad" },
-      { key: "distance", label: "Distance", placeholder: "Distance...", keyboardType: "decimal-pad" },
-      { key: "activeMinutes", label: "Active minutes", placeholder: "Minutes...", keyboardType: "number-pad" },
+      { key: "distance", label: "Distance (km)", placeholder: "Distance in km...", keyboardType: "decimal-pad", unit: "km" },
+      { key: "activeMinutes", label: "Active minutes (min)", placeholder: "Active minutes...", keyboardType: "number-pad", unit: "min" },
+    ],
+  },
+  {
+    key: "weight",
+    label: "Weight check-in",
+    namePlaceholder: "Log name",
+    fields: [
+      { key: "weight", label: "Weight (kg)", placeholder: "Weight in kg...", keyboardType: "decimal-pad", unit: "kg" },
     ],
   },
 ];
@@ -113,23 +128,54 @@ function getRelativeDateKey(daysAgo) {
   return formatDateKey(date);
 }
 
-function getRelativeMonthDateKey(monthsAgo, dayOfMonth = 12) {
-  const date = new Date();
-  date.setDate(1);
-  date.setMonth(date.getMonth() - monthsAgo);
+function getMonthKey(dateKey) {
+  return dateKey.slice(0, 7);
+}
 
-  const lastDayOfMonth = new Date(
-    date.getFullYear(),
-    date.getMonth() + 1,
-    0,
-  ).getDate();
-  date.setDate(Math.min(dayOfMonth, lastDayOfMonth));
-
+function shiftDateKey(dateKey, offsetDays) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + offsetDays);
   return formatDateKey(date);
 }
 
-function getMonthKey(dateKey) {
-  return dateKey.slice(0, 7);
+function getWeekStartDateKey(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  const daysSinceMonday = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - daysSinceMonday);
+  return formatDateKey(date);
+}
+
+function getWeekDateOptions(dateKey) {
+  const weekStartDateKey = getWeekStartDateKey(dateKey);
+
+  return WEEK_DAYS.map((dayLabel, index) => {
+    const nextDateKey = shiftDateKey(weekStartDateKey, index);
+    return {
+      dayLabel,
+      dateKey: nextDateKey,
+      shortLabel: formatLogDateLabel(nextDateKey),
+    };
+  });
+}
+
+function formatWeekRangeLabel(dateKey) {
+  const weekDateOptions = getWeekDateOptions(dateKey);
+  const firstDateKey = weekDateOptions[0].dateKey;
+  const lastDateKey = weekDateOptions[weekDateOptions.length - 1].dateKey;
+  const [firstYear, firstMonth, firstDay] = firstDateKey.split("-").map(Number);
+  const [lastYear, lastMonth, lastDay] = lastDateKey.split("-").map(Number);
+  const firstDate = new Date(firstYear, firstMonth - 1, firstDay);
+  const lastDate = new Date(lastYear, lastMonth - 1, lastDay);
+
+  return `${firstDate.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  })} - ${lastDate.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  })}`;
 }
 
 function shiftMonthKey(monthKey, offset) {
@@ -194,6 +240,33 @@ function formatLogDateLabel(dateKey) {
   });
 }
 
+function parseTimeToMinutes(value) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(value || "").trim());
+
+  if (!match) {
+    return null;
+  }
+
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function calculateSleepHours(bedtime, wakeTime) {
+  const bedtimeMinutes = parseTimeToMinutes(bedtime);
+  const wakeTimeMinutes = parseTimeToMinutes(wakeTime);
+
+  if (bedtimeMinutes == null || wakeTimeMinutes == null) {
+    return null;
+  }
+
+  let durationMinutes = wakeTimeMinutes - bedtimeMinutes;
+
+  if (durationMinutes <= 0) {
+    durationMinutes += 24 * 60;
+  }
+
+  return Number((durationMinutes / 60).toFixed(1));
+}
+
 function getLogType(typeKey) {
   return LOG_TYPES.find((item) => item.key === typeKey) ?? LOG_TYPES[0];
 }
@@ -209,103 +282,18 @@ function createEmptyDraft(typeKey) {
   };
 }
 
-function buildInitialLogs(dateKey) {
-  // Seed logs keep the history and edit flows visible before backend data exists.
-  return [
-    {
-      id: "workout-1",
-      dateKey,
-      typeKey: "workout",
-      name: "Bench press",
-      values: {
-        sets: "4",
-        reps: "8",
-        weight: "52.5kg",
-      },
-    },
-    {
-      id: "sleep-1",
-      dateKey,
-      typeKey: "sleep",
-      name: "Overnight sleep",
-      values: {
-        hours: "7.8",
-        bedtime: "23:10",
-        wakeTime: "07:05",
-      },
-    },
-    {
-      id: "cardio-previous",
-      dateKey: getRelativeDateKey(2),
-      typeKey: "cardio",
-      name: "Zone 2 bike",
-      values: {
-        duration: "35",
-        distance: "14km",
-        calories: "310",
-      },
-    },
-    {
-      id: "nutrition-previous",
-      dateKey: getRelativeDateKey(5),
-      typeKey: "nutrition",
-      name: "Dinner",
-      values: {
-        calories: "680",
-        protein: "42g",
-        carbs: "70g",
-      },
-    },
-    {
-      id: "steps-last-month",
-      dateKey: getRelativeMonthDateKey(1, 12),
-      typeKey: "steps",
-      name: "Lunch walk",
-      values: {
-        steps: "9,420",
-        distance: "6.7km",
-        activeMinutes: "54",
-      },
-    },
-    {
-      id: "calories-two-months",
-      dateKey: getRelativeMonthDateKey(2, 18),
-      typeKey: "caloriesBurned",
-      name: "Bike session",
-      values: {
-        calories: "455",
-        source: "Indoor bike",
-        duration: "42",
-      },
-    },
-  ];
-}
-
 function formatHistoryValue(field, value) {
   if (!value) {
     return "Not set";
   }
 
-  return value;
-}
+  const stringValue = String(value).trim();
 
-function buildHealthMetricRows(logs) {
-  // Flatten each saved log into individual metric rows for the daily summary card.
-  // This makes "all metrics for a date" easy to render even though logs are
-  // stored as mixed types with different fields.
-  return logs.flatMap((entry) => {
-    const type = getLogType(entry.typeKey);
+  if (!field.unit || stringValue.toLowerCase().includes(field.unit.toLowerCase())) {
+    return stringValue;
+  }
 
-    return type.fields.map((field) => ({
-      id: `${entry.id}-${field.key}`,
-      dateKey: entry.dateKey,
-      typeKey: entry.typeKey,
-      typeLabel: type.label,
-      metricLabel: field.label,
-      value: formatHistoryValue(field, entry.values[field.key]),
-      logName: entry.name || type.namePlaceholder,
-    }));
-  });
+  return `${stringValue} ${field.unit}`;
 }
 
 function SaveButton({ label, onPress, disabled = false }) {
@@ -327,6 +315,7 @@ function SaveButton({ label, onPress, disabled = false }) {
 }
 
 export default function LogScreen() {
+  const params = useLocalSearchParams();
   const {
     shellPaddingHorizontal,
     shellPaddingVertical,
@@ -340,41 +329,69 @@ export default function LogScreen() {
   const [selectedTypeKey, setSelectedTypeKey] = useState(LOG_TYPES[0].key);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [selectedHistoryDateKey, setSelectedHistoryDateKey] = useState(todayKey);
-  const [isHistoryCalendarOpen, setIsHistoryCalendarOpen] = useState(false);
-  const [historyCalendarMonthKey, setHistoryCalendarMonthKey] = useState(
-    getMonthKey(todayKey),
-  );
   const [selectedLogDateKey, setSelectedLogDateKey] = useState(todayKey);
   const [isLogCalendarOpen, setIsLogCalendarOpen] = useState(false);
   const [logCalendarMonthKey, setLogCalendarMonthKey] = useState(getMonthKey(todayKey));
-  const [selectedMetricDateKey, setSelectedMetricDateKey] = useState(todayKey);
-  const [isMetricCalendarOpen, setIsMetricCalendarOpen] = useState(false);
-  const [calendarMonthKey, setCalendarMonthKey] = useState(getMonthKey(todayKey));
-  // Replace this local state with persisted daily logs when backend storage
-  // and health integrations are connected. The rest of the screen already uses
-  // normal create/update/delete handlers, so API calls can slot into those places.
-  const [logs, setLogs] = useState(() => buildInitialLogs(todayKey));
+  const [logs, setLogs] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(() => createEmptyDraft(LOG_TYPES[0].key));
   const [saveError, setSaveError] = useState("");
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isSavingLog, setIsSavingLog] = useState(false);
 
   const activeType = getLogType(selectedTypeKey);
+  const calculatedSleepHours = selectedTypeKey === "sleep"
+    ? calculateSleepHours(draft.values.bedtime, draft.values.wakeTime)
+    : null;
   const selectedHistoryLogs = logs.filter(
     (entry) => entry.dateKey === selectedHistoryDateKey,
   );
-  const healthMetricRows = buildHealthMetricRows(logs);
+  const currentWeekDateOptions = getWeekDateOptions(selectedHistoryDateKey);
+  const currentWeekDateKeys = new Set(currentWeekDateOptions.map((entry) => entry.dateKey));
+  const currentWeekLogs = logs.filter((entry) => currentWeekDateKeys.has(entry.dateKey));
   const loggedDateKeys = new Set(logs.map((entry) => entry.dateKey));
   const logCalendarCells = buildCalendarCells(logCalendarMonthKey);
-  const historyCalendarCells = buildCalendarCells(historyCalendarMonthKey);
-  const calendarCells = buildCalendarCells(calendarMonthKey);
-  const visibleHealthMetricRows = healthMetricRows.filter(
-    (metric) => metric.dateKey === selectedMetricDateKey,
-  );
-  const selectedMetricPeriodLabel = formatLogDateLabel(selectedMetricDateKey);
   const hasDraftContent =
     draft.name.trim().length > 0 ||
     Object.values(draft.values).some((value) => value.trim().length > 0);
+
+  useEffect(() => {
+    const requestedType = Array.isArray(params.type) ? params.type[0] : params.type;
+
+    if (!requestedType || !LOG_TYPES.some((type) => type.key === requestedType)) {
+      return;
+    }
+
+    setSelectedTypeKey(requestedType);
+    setDraft(createEmptyDraft(requestedType));
+    setEditingId(null);
+    setIsMenuOpen(false);
+    setSaveError("");
+  }, [params.type]);
+
+  useEffect(() => {
+    loadLogs();
+  }, []);
+
+  async function loadLogs() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSaveError("Log in to sync your health logs.");
+      return;
+    }
+
+    try {
+      setIsLoadingLogs(true);
+      setLogs(await getLogs(token));
+      setSaveError("");
+    } catch (error) {
+      setSaveError(error.message || "Could not load saved logs.");
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  }
 
   function handleSelectType(typeKey) {
     // Changing type resets edit mode because each log type owns a different field set.
@@ -413,12 +430,12 @@ export default function LogScreen() {
     setSaveError("");
   }
 
-  function handleSave() {
+  async function handleSave() {
     // Prevent blank logs by requiring a name and at least one filled metric value.
     // Backend validation should repeat this rule to protect the database too.
     const hasLogName = draft.name.trim().length > 0;
     const hasMetricValue = Object.values(draft.values).some(
-      (value) => value.trim().length > 0,
+      (value) => String(value || "").trim().length > 0,
     );
 
     if (!hasLogName || !hasMetricValue) {
@@ -426,25 +443,52 @@ export default function LogScreen() {
       return;
     }
 
+    if (selectedTypeKey === "sleep" && calculatedSleepHours == null) {
+      setSaveError("Enter bedtime and wake time in 24h format like 23:00 and 07:00.");
+      return;
+    }
+
+    const token = getAuthToken();
+
+    if (!token) {
+      setSaveError("Log in again before saving logs.");
+      return;
+    }
+
     const nextLog = {
-      id: editingId ?? `${selectedTypeKey}-${Date.now()}`,
       dateKey: selectedLogDateKey,
       typeKey: selectedTypeKey,
       name: draft.name.trim(),
-      values: draft.values,
+      values: selectedTypeKey === "sleep"
+        ? {
+            ...draft.values,
+            hours: calculatedSleepHours,
+          }
+        : draft.values,
     };
 
-    setLogs((current) => {
-      if (editingId) {
-        return current.map((entry) => (entry.id === editingId ? nextLog : entry));
-      }
+    try {
+      setIsSavingLog(true);
+      const savedLog = editingId
+        ? await updateLog(token, editingId, nextLog)
+        : await createLog(token, nextLog);
 
-      return [nextLog, ...current];
-    });
+      setLogs((current) => {
+        if (editingId) {
+          return current.map((entry) => (entry.id === editingId ? savedLog : entry));
+        }
 
-    setDraft(createEmptyDraft(selectedTypeKey));
-    setEditingId(null);
-    setSaveError("");
+        return [savedLog, ...current];
+      });
+
+      setDraft(createEmptyDraft(selectedTypeKey));
+      setEditingId(null);
+      setSaveError("");
+    } catch (error) {
+      setSaveError(error.message || "Could not save this log.");
+    } finally {
+      setIsSavingLog(false);
+    }
   }
 
   function handleEdit(entry) {
@@ -465,15 +509,25 @@ export default function LogScreen() {
     setPendingDeleteId(id);
   }
 
-  function handleDelete(id) {
-    // Local delete path. Replace the state update with logsApi.deleteLog and
-    // then refresh/remove the deleted row from state once the API confirms it.
-    setLogs((current) => current.filter((entry) => entry.id !== id));
-    setPendingDeleteId(null);
+  async function handleDelete(id) {
+    const token = getAuthToken();
 
-    if (editingId === id) {
-      setEditingId(null);
-      setDraft(createEmptyDraft(selectedTypeKey));
+    if (!token) {
+      setSaveError("Log in again before deleting logs.");
+      return;
+    }
+
+    try {
+      await deleteLog(token, id);
+      setLogs((current) => current.filter((entry) => entry.id !== id));
+      setPendingDeleteId(null);
+
+      if (editingId === id) {
+        setEditingId(null);
+        setDraft(createEmptyDraft(selectedTypeKey));
+      }
+    } catch (error) {
+      setSaveError(error.message || "Could not delete this log.");
     }
   }
 
@@ -486,14 +540,10 @@ export default function LogScreen() {
 
   function handleSelectHistoryDate(dateKey) {
     setSelectedHistoryDateKey(dateKey);
-    setHistoryCalendarMonthKey(getMonthKey(dateKey));
-    setIsHistoryCalendarOpen(false);
   }
 
-  function handleSelectMetricDate(dateKey) {
-    setSelectedMetricDateKey(dateKey);
-    setCalendarMonthKey(getMonthKey(dateKey));
-    setIsMetricCalendarOpen(false);
+  function handleShiftHistoryWeek(offsetWeeks) {
+    setSelectedHistoryDateKey((current) => shiftDateKey(current, offsetWeeks * 7));
   }
 
   return (
@@ -751,17 +801,28 @@ export default function LogScreen() {
                   style={styles.logInput}
                 />
 
-                {activeType.fields.map((field) => (
-                  <TextInput
-                    key={field.key}
-                    value={draft.values[field.key]}
-                    onChangeText={(value) => handleChange(field.key, value)}
-                    placeholder={field.placeholder}
-                    placeholderTextColor="#7A8699"
-                    keyboardType={field.keyboardType}
-                    style={styles.logInput}
-                  />
-                ))}
+                {activeType.fields
+                  .filter((field) => !field.computed)
+                  .map((field) => (
+                    <TextInput
+                      key={field.key}
+                      value={draft.values[field.key]}
+                      onChangeText={(value) => handleChange(field.key, value)}
+                      placeholder={field.placeholder}
+                      placeholderTextColor="#7A8699"
+                      keyboardType={field.keyboardType}
+                      style={styles.logInput}
+                    />
+                  ))}
+
+                {selectedTypeKey === "sleep" ? (
+                  <View style={styles.computedMetricCard}>
+                    <Text style={styles.computedMetricLabel}>Calculated sleep duration</Text>
+                    <Text style={styles.computedMetricValue}>
+                      {calculatedSleepHours == null ? "Enter bedtime and wake time" : `${calculatedSleepHours} h`}
+                    </Text>
+                  </View>
+                ) : null}
 
                 {saveError ? (
                   <Text accessibilityRole="alert" style={styles.saveErrorText}>
@@ -799,142 +860,109 @@ export default function LogScreen() {
               </View>
 
               <SaveButton
-                label={editingId ? "Update log" : "Save log"}
-                disabled={!hasDraftContent}
+                label={isSavingLog ? "Saving..." : editingId ? "Update log" : "Save log"}
+                disabled={!hasDraftContent || isSavingLog}
                 onPress={handleSave}
               />
 
               <View style={[styles.historySection, { width: cardWidth }]}>
                 <View style={styles.sectionHeader}>
                   <View>
-                    <Text style={styles.eyebrow}>Past week</Text>
-                    <Text style={styles.sectionTitle}>View logs</Text>
+                    <Text style={styles.eyebrow}>History</Text>
+                    <Text style={styles.sectionTitle}>Week view</Text>
                   </View>
                   <Text style={styles.historyCount}>
-                    {selectedHistoryLogs.length} entries
+                    {currentWeekLogs.length} entries
                   </Text>
                 </View>
 
-                <Pressable
-                  onPress={() => setIsHistoryCalendarOpen((current) => !current)}
-                  style={({ pressed }) => [
-                    styles.historyDateButton,
-                    pressed && styles.buttonPressed,
-                  ]}
-                >
-                  <View>
-                    <Text style={styles.historyDateLabel}>Selected day</Text>
+                <View style={styles.weekNavRow}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Previous week"
+                    onPress={() => handleShiftHistoryWeek(-1)}
+                    style={({ pressed }) => [
+                      styles.calendarNavButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
+                    <Ionicons name="chevron-back-outline" size={18} color="#4EA955" />
+                  </Pressable>
+
+                  <View style={styles.weekNavCopy}>
+                    <Text style={styles.historyDateLabel}>Selected week</Text>
                     <Text style={styles.historyDateValue}>
-                      {formatLogDateLabel(selectedHistoryDateKey)}
+                      {formatWeekRangeLabel(selectedHistoryDateKey)}
                     </Text>
                   </View>
-                  <Ionicons
-                    name={isHistoryCalendarOpen ? "chevron-up-outline" : "chevron-down-outline"}
-                    size={18}
-                    color="#111827"
-                  />
-                </Pressable>
 
-                {isHistoryCalendarOpen ? (
-                  <View style={styles.calendarMenu}>
-                    <View style={styles.calendarHeader}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Next week"
+                    onPress={() => handleShiftHistoryWeek(1)}
+                    style={({ pressed }) => [
+                      styles.calendarNavButton,
+                      pressed && styles.buttonPressed,
+                    ]}
+                  >
+                    <Ionicons name="chevron-forward-outline" size={18} color="#4EA955" />
+                  </Pressable>
+                </View>
+
+                <View style={styles.weekDaySelectorRow}>
+                  {currentWeekDateOptions.map((dayOption) => {
+                    const isSelected = selectedHistoryDateKey === dayOption.dateKey;
+                    const hasLogs = loggedDateKeys.has(dayOption.dateKey);
+
+                    return (
                       <Pressable
+                        key={dayOption.dateKey}
                         accessibilityRole="button"
-                        accessibilityLabel="Previous month"
-                        onPress={() =>
-                          setHistoryCalendarMonthKey((current) =>
-                            shiftMonthKey(current, -1),
-                          )
-                        }
+                        accessibilityLabel={`Select ${dayOption.shortLabel}`}
+                        onPress={() => handleSelectHistoryDate(dayOption.dateKey)}
                         style={({ pressed }) => [
-                          styles.calendarNavButton,
+                          styles.weekDayButton,
+                          hasLogs && styles.weekDayButtonWithLogs,
+                          isSelected && styles.weekDayButtonSelected,
                           pressed && styles.buttonPressed,
                         ]}
                       >
-                        <Ionicons name="chevron-back-outline" size={18} color="#4EA955" />
-                      </Pressable>
-
-                      <Text style={styles.calendarMonthText}>
-                        {formatMonthLabel(historyCalendarMonthKey)}
-                      </Text>
-
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Next month"
-                        onPress={() =>
-                          setHistoryCalendarMonthKey((current) =>
-                            shiftMonthKey(current, 1),
-                          )
-                        }
-                        style={({ pressed }) => [
-                          styles.calendarNavButton,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Ionicons name="chevron-forward-outline" size={18} color="#4EA955" />
-                      </Pressable>
-                    </View>
-
-                    <View style={styles.calendarWeekdayRow}>
-                      {WEEK_DAYS.map((day) => (
-                        <Text key={day} style={styles.calendarWeekdayText}>
-                          {day}
+                        <Text
+                          style={[
+                            styles.weekDayLabel,
+                            isSelected && styles.weekDayLabelSelected,
+                          ]}
+                        >
+                          {dayOption.dayLabel}
                         </Text>
-                      ))}
-                    </View>
-
-                    <View style={styles.calendarGrid}>
-                      {historyCalendarCells.map((cell) => {
-                        if (cell.isPlaceholder) {
-                          return (
-                            <View
-                              key={cell.id}
-                              style={styles.calendarCellPlaceholder}
-                            />
-                          );
-                        }
-
-                        const isSelected = selectedHistoryDateKey === cell.dateKey;
-                        const hasLogs = loggedDateKeys.has(cell.dateKey);
-
-                        return (
-                          <Pressable
-                            key={cell.id}
-                            accessibilityRole="button"
-                            accessibilityLabel={`Select ${cell.dateKey}`}
-                            onPress={() => handleSelectHistoryDate(cell.dateKey)}
-                            style={({ pressed }) => [
-                              styles.calendarDay,
-                              hasLogs && styles.calendarDayWithLogs,
-                              isSelected && styles.calendarDaySelected,
-                              pressed && styles.buttonPressed,
+                        <Text
+                          style={[
+                            styles.weekDayValue,
+                            isSelected && styles.weekDayValueSelected,
+                          ]}
+                        >
+                          {dayOption.dateKey.slice(-2)}
+                        </Text>
+                        {hasLogs ? (
+                          <View
+                            style={[
+                              styles.weekDayDot,
+                              isSelected && styles.weekDayDotSelected,
                             ]}
-                          >
-                            <Text
-                              style={[
-                                styles.calendarDayText,
-                                isSelected && styles.calendarDayTextSelected,
-                              ]}
-                            >
-                              {cell.day}
-                            </Text>
-                            {hasLogs ? <View style={styles.calendarLogDot} /> : null}
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-
-                    <Text style={styles.calendarHelperText}>
-                      Green dots show days with saved logs.
-                    </Text>
-                  </View>
-                ) : null}
+                          />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
 
                 {selectedHistoryLogs.length === 0 ? (
                   <View style={styles.emptyState}>
                     <Text style={styles.emptyTitle}>No logs yet</Text>
                     <Text style={styles.emptyText}>
-                      No logs have been added for {formatLogDateLabel(selectedHistoryDateKey)}.
+                      {isLoadingLogs
+                        ? "Loading your saved logs..."
+                        : `No logs have been added for ${formatLogDateLabel(selectedHistoryDateKey)}.`}
                     </Text>
                   </View>
                 ) : (
@@ -1019,159 +1047,6 @@ export default function LogScreen() {
                     );
                   })
                 )}
-              </View>
-
-              <View style={[styles.metricsHistorySection, { width: cardWidth }]}>
-                <View style={styles.sectionHeader}>
-                  <View>
-                    <Text style={styles.eyebrow}>Health history</Text>
-                    <Text style={styles.sectionTitle}>Daily summary</Text>
-                  </View>
-                  <Text style={styles.historyCount}>
-                    {visibleHealthMetricRows.length} metrics
-                  </Text>
-                </View>
-
-                <View style={styles.metricCalendarWrap}>
-                  <Pressable
-                    onPress={() => setIsMetricCalendarOpen((current) => !current)}
-                    style={({ pressed }) => [
-                      styles.metricCalendarButton,
-                      pressed && styles.buttonPressed,
-                    ]}
-                  >
-                    <View>
-                      <Text style={styles.historyDateLabel}>Selected date</Text>
-                      <Text style={styles.historyDateValue}>
-                        {formatLogDateLabel(selectedMetricDateKey)}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name={isMetricCalendarOpen ? "chevron-up-outline" : "chevron-down-outline"}
-                      size={18}
-                      color="#111827"
-                    />
-                  </Pressable>
-
-                  {isMetricCalendarOpen ? (
-                    <View style={styles.calendarMenu}>
-                      <View style={styles.calendarHeader}>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Previous month"
-                          onPress={() =>
-                            setCalendarMonthKey((current) => shiftMonthKey(current, -1))
-                          }
-                          style={({ pressed }) => [
-                            styles.calendarNavButton,
-                            pressed && styles.buttonPressed,
-                          ]}
-                        >
-                          <Ionicons name="chevron-back-outline" size={18} color="#4EA955" />
-                        </Pressable>
-
-                        <Text style={styles.calendarMonthText}>
-                          {formatMonthLabel(calendarMonthKey)}
-                        </Text>
-
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel="Next month"
-                          onPress={() =>
-                            setCalendarMonthKey((current) => shiftMonthKey(current, 1))
-                          }
-                          style={({ pressed }) => [
-                            styles.calendarNavButton,
-                            pressed && styles.buttonPressed,
-                          ]}
-                        >
-                          <Ionicons name="chevron-forward-outline" size={18} color="#4EA955" />
-                        </Pressable>
-                      </View>
-
-                      <View style={styles.calendarWeekdayRow}>
-                        {WEEK_DAYS.map((day) => (
-                          <Text key={day} style={styles.calendarWeekdayText}>
-                            {day}
-                          </Text>
-                        ))}
-                      </View>
-
-                      <View style={styles.calendarGrid}>
-                        {calendarCells.map((cell) => {
-                          if (cell.isPlaceholder) {
-                            return (
-                              <View
-                                key={cell.id}
-                                style={styles.calendarCellPlaceholder}
-                              />
-                            );
-                          }
-
-                          const isSelected = selectedMetricDateKey === cell.dateKey;
-                          const hasLogs = loggedDateKeys.has(cell.dateKey);
-
-                          return (
-                            <Pressable
-                              key={cell.id}
-                              accessibilityRole="button"
-                              accessibilityLabel={`Select ${cell.dateKey}`}
-                              onPress={() => handleSelectMetricDate(cell.dateKey)}
-                              style={({ pressed }) => [
-                                styles.calendarDay,
-                                hasLogs && styles.calendarDayWithLogs,
-                                isSelected && styles.calendarDaySelected,
-                                pressed && styles.buttonPressed,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.calendarDayText,
-                                  isSelected && styles.calendarDayTextSelected,
-                                ]}
-                              >
-                                {cell.day}
-                              </Text>
-                              {hasLogs ? <View style={styles.calendarLogDot} /> : null}
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-
-                      <Text style={styles.calendarHelperText}>
-                        Green dots show days with saved logs.
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-
-                <View style={styles.healthMetricList}>
-                  {visibleHealthMetricRows.length === 0 ? (
-                    <View style={styles.emptyState}>
-                      <Text style={styles.emptyTitle}>No metrics yet</Text>
-                      <Text style={styles.emptyText}>
-                        Logged health metrics for {selectedMetricPeriodLabel} will appear here.
-                      </Text>
-                    </View>
-                  ) : (
-                    visibleHealthMetricRows.map((metric) => (
-                      <View key={metric.id} style={styles.healthMetricRow}>
-                        <View style={styles.healthMetricCopy}>
-                          <Text style={styles.metricSummaryLabel}>
-                            {metric.metricLabel}
-                          </Text>
-                          <Text style={styles.healthMetricValue}>{metric.value}</Text>
-                          <Text style={styles.healthMetricMeta}>
-                            {metric.typeLabel} • {metric.logName}
-                          </Text>
-                        </View>
-                        <Text style={styles.healthMetricDate}>
-                          {formatLogDateLabel(metric.dateKey)}
-                        </Text>
-                      </View>
-                    ))
-                  )}
-                </View>
               </View>
             </View>
 
@@ -1363,6 +1238,28 @@ const styles = StyleSheet.create({
     color: "#111827",
     marginBottom: 12,
   },
+  computedMetricCard: {
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 12,
+  },
+  computedMetricLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#83B66E",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  computedMetricValue: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#111827",
+  },
   logDateButton: {
     marginBottom: 12,
   },
@@ -1448,13 +1345,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   historySection: {
-    borderWidth: 1,
-    borderColor: "#CFEFD9",
-    borderRadius: 28,
-    backgroundColor: "#ECFDF3",
-    padding: 18,
-  },
-  metricsHistorySection: {
     borderWidth: 1,
     borderColor: "#CFEFD9",
     borderRadius: 28,
@@ -1564,21 +1454,68 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#111827",
   },
-  metricCalendarWrap: {
+  weekNavRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
     marginBottom: 12,
   },
-  metricCalendarButton: {
-    minHeight: 58,
-    borderRadius: 20,
+  weekNavCopy: {
+    flex: 1,
+    alignItems: "center",
+  },
+  weekDaySelectorRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  weekDayButton: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: 18,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#CFEFD9",
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  weekDayButtonWithLogs: {
+    backgroundColor: "#F4FFF7",
+    borderColor: "#CFEFD9",
+  },
+  weekDayButtonSelected: {
+    backgroundColor: "#4EA955",
+    borderColor: "#4EA955",
+  },
+  weekDayLabel: {
+    fontSize: 9,
+    fontWeight: "900",
+    color: "#83B66E",
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  weekDayLabelSelected: {
+    color: "#DDF4E4",
+  },
+  weekDayValue: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  weekDayValueSelected: {
+    color: "#FFFFFF",
+  },
+  weekDayDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "#4EA955",
+    marginTop: 6,
+  },
+  weekDayDotSelected: {
+    backgroundColor: "#FFFFFF",
   },
   calendarMenu: {
     marginTop: 10,

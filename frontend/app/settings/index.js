@@ -2,14 +2,14 @@
  * Settings screen.
  *
  * Holds preferences, integrations, profile editing, privacy, friend management,
- * and account/data controls. These interactions currently update local state
- * and display feedback. Backend wiring should hydrate this screen from profile,
- * social, logs, integration, and auth APIs.
+ * and account/data controls.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Image,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -21,6 +21,48 @@ import {
 import AppHeader from "../../src/shared/ui/AppHeader";
 import BottomNav from "../../src/shared/ui/BottomNav";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { getMyProfile, updateMyProfile } from "../../src/services/api/profileApi";
+import { resolveApiAssetUrl } from "../../src/services/api/client";
+import { exportAccountData, deleteAccount as deleteAccountApi } from "../../src/services/api/accountApi";
+import { getLogs, deleteLog } from "../../src/services/api/logsApi";
+import { uploadProfilePhoto } from "../../src/services/api/uploadApi";
+import {
+  getConnections,
+  removeFriend as removeFriendApi,
+  respondToFriendRequest,
+} from "../../src/services/api/socialApi";
+import {
+  clearSession,
+  getAuthToken,
+  getCurrentUser,
+  updateCurrentUser,
+} from "../../src/services/authSession";
+
+const SETTINGS_STORAGE_KEY = "jhoom.settings.preferences";
+
+function canUseSettingsStorage() {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function loadStoredPreferences() {
+  if (!canUseSettingsStorage()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(window.localStorage.getItem(SETTINGS_STORAGE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredPreferences(preferences) {
+  if (!canUseSettingsStorage()) {
+    return;
+  }
+
+  window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(preferences));
+}
 
 // Settings dropdown options are local UI choices until account management APIs exist.
 // Keep option labels stable if possible because the render helpers switch on them.
@@ -34,20 +76,6 @@ const friendOptions = [
   "Manage friend requests",
   "Remove friend",
   "Refuse friend connection",
-];
-
-const initialManagedLogs = [
-  // Demo rows for the settings management panels. Replace with logsApi data.
-  { id: "log-1", title: "Upper body workout", date: "Today", type: "Workout" },
-  { id: "log-2", title: "8,400 steps", date: "Yesterday", type: "Steps" },
-  { id: "log-3", title: "Sleep entry", date: "Mon", type: "Sleep" },
-];
-
-const initialFriendConnections = [
-  // Demo connections for the friend management panels. Replace with socialApi data.
-  { id: "friend-1", name: "Maya", username: "@maya.moves", status: "Friend" },
-  { id: "friend-2", name: "Rio", username: "@rio.run", status: "Friend" },
-  { id: "friend-3", name: "Sam", username: "@sam.strength", status: "Pending" },
 ];
 
 function SegmentedControl({ label, options, value, onChange }) {
@@ -148,6 +176,7 @@ function DropdownSetting({
 }
 
 export default function SettingsScreen() {
+  const storedPreferences = loadStoredPreferences();
   const router = useRouter();
   const {
     shellPaddingHorizontal,
@@ -158,24 +187,132 @@ export default function SettingsScreen() {
     shellMinHeight,
     cardWidth,
   } = useMobileFrame();
-  const [unitSystem, setUnitSystem] = useState("Metric");
-  const [integration, setIntegration] = useState("Apple Health");
+  const [integration, setIntegration] = useState(storedPreferences.integration || "Apple Health");
   const [logAction, setLogAction] = useState(logManagementOptions[0]);
   const [friendAction, setFriendAction] = useState(friendOptions[0]);
   const [isLogMenuOpen, setIsLogMenuOpen] = useState(false);
   const [isFriendMenuOpen, setIsFriendMenuOpen] = useState(false);
-  const [hasProfilePhoto, setHasProfilePhoto] = useState(false);
-  const [managedLogs, setManagedLogs] = useState(initialManagedLogs);
-  const [friendConnections, setFriendConnections] = useState(
-    initialFriendConnections,
-  );
+  const [managedLogs, setManagedLogs] = useState([]);
+  const [friendConnections, setFriendConnections] = useState([]);
   const [profile, setProfile] = useState({
-    username: "jhoom.user",
-    email: "demo@jhoom.app",
+    username: getCurrentUser()?.username || "jhoom.user",
+    email: getCurrentUser()?.email || "",
+    fullName: "",
     age: "",
+    heightCm: "",
+    bio: "",
+    profilePictureUrl: "",
   });
   const [privacy, setPrivacy] = useState("Friends only");
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [localProfilePhotoPreview, setLocalProfilePhotoPreview] = useState("");
+  const [profilePhotoVersion, setProfilePhotoVersion] = useState(Date.now());
+  const [profilePhotoLoadFailed, setProfilePhotoLoadFailed] = useState(false);
+  const resolvedProfilePhotoUri = resolveApiAssetUrl(profile.profilePictureUrl);
+  const isUsingLocalProfilePhotoPreview = Boolean(localProfilePhotoPreview);
+  const profilePhotoUri = localProfilePhotoPreview || (resolvedProfilePhotoUri
+    ? `${resolvedProfilePhotoUri}${resolvedProfilePhotoUri.includes("?") ? "&" : "?"}v=${profilePhotoVersion}`
+    : "");
+  const hasProfilePhoto = isUsingLocalProfilePhotoPreview
+    || (Boolean(resolvedProfilePhotoUri) && !profilePhotoLoadFailed);
+
+  useEffect(() => {
+    setProfilePhotoLoadFailed(false);
+    setProfilePhotoVersion(Date.now());
+  }, [profile.profilePictureUrl]);
+
+  useEffect(() => {
+    function normaliseConnections(connections) {
+      return [
+        ...(connections.friends || []).map((friend) => ({
+          ...friend,
+          status: "Friend",
+        })),
+        ...(connections.pendingIncoming || []).map((friend) => ({
+          ...friend,
+          status: "Pending",
+        })),
+      ];
+    }
+
+    function normaliseLogs(logs) {
+      return logs.slice(0, 10).map((log) => ({
+        id: log.id,
+        title: log.name,
+        date: log.dateKey,
+        type: log.typeKey,
+      }));
+    }
+
+    async function loadProfile() {
+      const token = getAuthToken();
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        const apiProfile = await getMyProfile(token);
+        setProfile((current) => ({
+          ...current,
+          username: apiProfile.username || current.username,
+          email: apiProfile.email || current.email,
+          fullName: apiProfile.full_name || "",
+          age: apiProfile.age != null ? String(apiProfile.age) : "",
+          heightCm: apiProfile.height_cm != null ? String(apiProfile.height_cm) : "",
+          bio: apiProfile.bio || "",
+          profilePictureUrl: apiProfile.profile_picture_url || "",
+        }));
+        setPrivacy(
+          apiProfile.is_dob_public || apiProfile.is_age_public || apiProfile.is_height_public || apiProfile.is_weight_public
+            ? "Friends only"
+            : "Private",
+        );
+        updateCurrentUser({
+          username: apiProfile.username,
+          email: apiProfile.email,
+          profile_picture_url: apiProfile.profile_picture_url || "",
+          profile_picture_preview_url: "",
+        });
+        setLocalProfilePhotoPreview("");
+        setProfilePhotoLoadFailed(false);
+      } catch (error) {
+        setSettingsNotice(error.message || "Could not load your profile.");
+      }
+    }
+
+    async function loadFriends() {
+      const token = getAuthToken();
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        setFriendConnections(normaliseConnections(await getConnections(token)));
+      } catch {
+        setFriendConnections([]);
+      }
+    }
+
+    async function loadManagedLogs() {
+      const token = getAuthToken();
+
+      if (!token) {
+        return;
+      }
+
+      try {
+        setManagedLogs(normaliseLogs(await getLogs(token)));
+      } catch {
+        setManagedLogs([]);
+      }
+    }
+
+    loadProfile();
+    loadFriends();
+    loadManagedLogs();
+  }, []);
 
   function handleSelectLogAction(option) {
     setLogAction(option);
@@ -189,29 +326,42 @@ export default function SettingsScreen() {
     setSettingsNotice(`${option} selected. Friend changes update this screen instantly.`);
   }
 
-  function handleUnitChange(option) {
-    setUnitSystem(option);
-    setSettingsNotice(
-      `Units changed to ${option}. Logged health values will use this preference when backend sync is connected.`,
-    );
-  }
-
   function handleIntegrationChange(option) {
-    // Selecting an integration does not connect health data yet. Real support
-    // should launch the correct permission/OAuth flow, then persist connection status.
     setIntegration(option);
+    saveStoredPreferences({
+      ...loadStoredPreferences(),
+      integration: option,
+    });
     setSettingsNotice(
-      `${option} selected. The real connection flow can plug into this control later.`,
+      `${option} preference saved. Connection permissions still need to be completed separately.`,
     );
   }
 
-  function handlePrivacyChange(option) {
+  async function handlePrivacyChange(option) {
     setPrivacy(option);
-    setSettingsNotice(`Profile visibility changed to ${option}.`);
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before changing profile visibility.");
+      return;
+    }
+
+    const isVisible = option === "Friends only";
+
+    try {
+      await updateMyProfile(token, {
+        is_dob_public: isVisible,
+        is_age_public: isVisible,
+        is_height_public: isVisible,
+        is_weight_public: isVisible,
+      });
+      setSettingsNotice(`Profile visibility saved as ${option}.`);
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not update profile visibility.");
+    }
   }
 
   function handleProfileChange(field, value) {
-    // Profile edits stay local until updateMyProfile is connected.
     setProfile((current) => ({
       ...current,
       [field]: value,
@@ -219,22 +369,82 @@ export default function SettingsScreen() {
   }
 
   function handleProfilePhotoToggle() {
-    setHasProfilePhoto((current) => {
-      const nextValue = !current;
+    if (Platform.OS !== "web" || typeof document === "undefined") {
+      setSettingsNotice("Profile photo upload is available in the web app.");
+      return;
+    }
 
-      setSettingsNotice(
-        nextValue
-          ? "Profile photo selected. Upload storage can be connected from this button later."
-          : "Profile photo selection removed.",
-      );
+    const token = getAuthToken();
 
-      return nextValue;
-    });
+    if (!token) {
+      setSettingsNotice("Log in again before changing your profile photo.");
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+
+    input.onchange = async () => {
+      const file = input.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        setSettingsNotice("Choose an image file for your profile photo.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          setLocalProfilePhotoPreview(reader.result);
+          setProfilePhotoLoadFailed(false);
+          updateCurrentUser({
+            profile_picture_preview_url: reader.result,
+          });
+          const uploadedPhoto = await uploadProfilePhoto(token, {
+            dataUrl: reader.result,
+            filename: file.name,
+          });
+          const response = await updateMyProfile(token, {
+            profile_picture_url: uploadedPhoto.url,
+          });
+          setProfile((current) => ({
+            ...current,
+            profilePictureUrl:
+              response.profile?.profile_picture_url || uploadedPhoto.url,
+          }));
+          setProfilePhotoLoadFailed(false);
+          setProfilePhotoVersion(Date.now());
+          updateCurrentUser({
+            profile_picture_url:
+              response.profile?.profile_picture_url || uploadedPhoto.url,
+            profile_picture_preview_url: reader.result,
+          });
+          setSettingsNotice("Profile photo updated.");
+        } catch (error) {
+          setLocalProfilePhotoPreview("");
+          updateCurrentUser({
+            profile_picture_preview_url: "",
+          });
+          setSettingsNotice(error.message || "Could not upload profile photo.");
+        }
+      };
+      reader.onerror = () => setSettingsNotice("Could not read that image.");
+      reader.readAsDataURL(file);
+    };
+
+    input.click();
   }
 
-  function handleSaveProfile() {
+  async function handleSaveProfile() {
     const trimmedUsername = profile.username.trim();
     const trimmedEmail = profile.email.trim();
+    const trimmedFullName = profile.fullName.trim();
+    const trimmedBio = profile.bio.trim();
     const hasValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail);
 
     if (!trimmedUsername) {
@@ -247,46 +457,186 @@ export default function SettingsScreen() {
       return;
     }
 
-    setProfile((current) => ({
-      ...current,
-      username: trimmedUsername,
-      email: trimmedEmail,
-    }));
-    setSettingsNotice("Profile saved locally. This is ready to connect to your account API.");
-  }
+    const token = getAuthToken();
 
-  function handleDeleteOldLogs() {
-    if (managedLogs.length === 0) {
-      setSettingsNotice("There are no saved sample logs left to delete.");
+    if (!token) {
+      setSettingsNotice("Log in again before saving your profile.");
       return;
     }
 
-    setManagedLogs([]);
-    setSettingsNotice("Old logs removed from this frontend view.");
+    try {
+      const response = await updateMyProfile(token, {
+        username: trimmedUsername,
+        email: trimmedEmail.toLowerCase(),
+        full_name: trimmedFullName || null,
+        age: profile.age ? Number(profile.age) : null,
+        height_cm: profile.heightCm ? Number(profile.heightCm) : null,
+        bio: trimmedBio || null,
+        profile_picture_url: profile.profilePictureUrl || null,
+        is_dob_public: privacy === "Friends only",
+        is_age_public: privacy === "Friends only",
+        is_height_public: privacy === "Friends only",
+        is_weight_public: privacy === "Friends only",
+      });
+
+      setProfile((current) => ({
+        ...current,
+        username: response.profile?.username || trimmedUsername,
+        email: response.profile?.email || trimmedEmail.toLowerCase(),
+        fullName: response.profile?.full_name || trimmedFullName,
+        age: response.profile?.age != null ? String(response.profile.age) : "",
+        heightCm: response.profile?.height_cm != null ? String(response.profile.height_cm) : "",
+        bio: response.profile?.bio || trimmedBio,
+        profilePictureUrl:
+          response.profile?.profile_picture_url || current.profilePictureUrl,
+      }));
+      updateCurrentUser({
+        username: response.profile?.username || trimmedUsername,
+        email: response.profile?.email || trimmedEmail.toLowerCase(),
+        profile_picture_url:
+          response.profile?.profile_picture_url || profile.profilePictureUrl || "",
+        profile_picture_preview_url: localProfilePhotoPreview || "",
+      });
+      setSettingsNotice("Profile saved.");
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not save your profile.");
+    }
   }
 
-  function handleExportWeeklyLogs() {
-    setSettingsNotice(
-      `Weekly export prepared for ${managedLogs.length} visible log${
-        managedLogs.length === 1 ? "" : "s"
-      }. Backend file generation can connect here.`,
-    );
+  async function handleDeleteOldLogs() {
+    if (managedLogs.length === 0) {
+      setSettingsNotice("There are no saved logs listed right now.");
+      return;
+    }
+
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before deleting logs.");
+      return;
+    }
+
+    try {
+      await Promise.all(managedLogs.map((log) => deleteLog(token, log.id)));
+      setManagedLogs([]);
+      setSettingsNotice("Listed logs deleted.");
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not delete listed logs.");
+    }
   }
 
-  function handleAcceptFriend(friendId) {
-    setFriendConnections((current) =>
-      current.map((friend) =>
-        friend.id === friendId ? { ...friend, status: "Friend" } : friend,
-      ),
-    );
-    setSettingsNotice("Friend request accepted.");
+  async function handleExportWeeklyLogs() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before exporting logs.");
+      return;
+    }
+
+    try {
+      const exportData = await exportAccountData(token);
+      const logCount = exportData.logs?.length || 0;
+      setSettingsNotice(`Export contains ${logCount} saved log${logCount === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not export logs.");
+    }
   }
 
-  function handleRemoveFriend(friendId) {
-    setFriendConnections((current) =>
-      current.filter((friend) => friend.id !== friendId),
-    );
-    setSettingsNotice("Friend connection removed.");
+  async function handleAcceptFriend(friendId) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before accepting friend requests.");
+      return;
+    }
+
+    try {
+      await respondToFriendRequest(token, friendId, "accept");
+      setFriendConnections((current) =>
+        current.map((friend) =>
+          friend.id === friendId ? { ...friend, status: "Friend" } : friend,
+        ),
+      );
+      setSettingsNotice("Friend request accepted.");
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not accept friend request.");
+    }
+  }
+
+  async function handleRemoveFriend(friendId) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before changing friends.");
+      return;
+    }
+
+    try {
+      await removeFriendApi(token, friendId);
+      setFriendConnections((current) =>
+        current.filter((friend) => friend.id !== friendId),
+      );
+      setSettingsNotice("Friend connection removed.");
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not update friend connection.");
+    }
+  }
+
+  async function handleExportAccountData() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before exporting your data.");
+      return;
+    }
+
+    try {
+      const exportData = await exportAccountData(token);
+
+      if (Platform.OS === "web" && typeof document !== "undefined") {
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `jhoom-data-${new Date().toISOString().slice(0, 10)}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+      }
+
+      setSettingsNotice("Account data export ready.");
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not export account data.");
+    }
+  }
+
+  async function handleDeleteAccount() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setSettingsNotice("Log in again before deleting your account.");
+      return;
+    }
+
+    if (Platform.OS !== "web" || typeof window === "undefined") {
+      setSettingsNotice("Account deletion confirmation is available in the web app.");
+      return;
+    }
+
+    const password = window.prompt("Enter your password to permanently delete your Jhoom account.");
+
+    if (!password) {
+      return;
+    }
+
+    try {
+      await deleteAccountApi(token, password);
+      clearSession();
+      router.replace("/(auth)/login");
+    } catch (error) {
+      setSettingsNotice(error.message || "Could not delete account.");
+    }
   }
 
   function renderLogRows() {
@@ -354,7 +704,7 @@ export default function SettingsScreen() {
       <View style={styles.actionPanel}>
         <Text style={styles.panelTitle}>Old logs</Text>
         <Text style={styles.panelText}>
-          Delete visible sample logs here. Real log deletion should call the logs API.
+          Delete the listed saved logs here. Full saved-data export uses the backend.
         </Text>
         {renderLogRows()}
         <Pressable
@@ -484,12 +834,15 @@ export default function SettingsScreen() {
                   <Ionicons name="settings-outline" size={22} color="#4EA955" />
                 </View>
 
-                <SegmentedControl
-                  label="Units"
-                  options={["Imperial", "Metric"]}
-                  value={unitSystem}
-                  onChange={handleUnitChange}
-                />
+                <View style={styles.settingGroup}>
+                  <Text style={styles.groupLabel}>Units</Text>
+                  <View style={styles.infoPanel}>
+                    <Text style={styles.infoPanelTitle}>Metric only</Text>
+                    <Text style={styles.infoPanelText}>
+                      Jhoom uses cm, kg, km, min, kcal, g, hours, and steps across the app.
+                    </Text>
+                  </View>
+                </View>
 
                 <SegmentedControl
                   label="Integrations"
@@ -534,6 +887,32 @@ export default function SettingsScreen() {
                   <Ionicons name="person-circle-outline" size={22} color="#4EA955" />
                 </View>
 
+                <View style={styles.profilePhotoSection}>
+                  <View style={styles.profilePhotoFrame}>
+                    {hasProfilePhoto ? (
+                      isUsingLocalProfilePhotoPreview ? (
+                        <Image
+                          source={{ uri: profilePhotoUri }}
+                          style={styles.profilePhotoImage}
+                        />
+                      ) : (
+                        <Image
+                          source={{ uri: profilePhotoUri }}
+                          style={styles.profilePhotoImage}
+                          onError={() => {
+                            setProfilePhotoLoadFailed(true);
+                            setSettingsNotice("Profile photo uploaded, but the preview could not be loaded.");
+                          }}
+                        />
+                      )
+                    ) : (
+                      <View style={styles.profilePhotoPlaceholder}>
+                        <Ionicons name="person-outline" size={32} color="#83B66E" />
+                      </View>
+                    )}
+                  </View>
+                </View>
+
                 <TextInput
                   value={profile.username}
                   onChangeText={(value) => handleProfileChange("username", value)}
@@ -554,11 +933,38 @@ export default function SettingsScreen() {
                 />
 
                 <TextInput
-                  value={profile.age}
-                  onChangeText={(value) => handleProfileChange("age", value)}
-                  placeholder="Age / basic info"
+                  value={profile.fullName}
+                  onChangeText={(value) => handleProfileChange("fullName", value)}
+                  placeholder="Full name"
                   placeholderTextColor="#7A8699"
                   style={styles.profileInput}
+                />
+
+                <TextInput
+                  value={profile.age}
+                  onChangeText={(value) => handleProfileChange("age", value)}
+                  placeholder="Age (years)"
+                  placeholderTextColor="#7A8699"
+                  style={styles.profileInput}
+                  keyboardType="number-pad"
+                />
+
+                <TextInput
+                  value={profile.heightCm}
+                  onChangeText={(value) => handleProfileChange("heightCm", value)}
+                  placeholder="Height (cm)"
+                  placeholderTextColor="#7A8699"
+                  style={styles.profileInput}
+                  keyboardType="decimal-pad"
+                />
+
+                <TextInput
+                  value={profile.bio}
+                  onChangeText={(value) => handleProfileChange("bio", value)}
+                  placeholder="Bio"
+                  placeholderTextColor="#7A8699"
+                  style={[styles.profileInput, styles.profileTextarea]}
+                  multiline
                 />
 
                 <Pressable
@@ -579,10 +985,10 @@ export default function SettingsScreen() {
                 </Pressable>
 
                 <Text style={styles.profileActionText}>
-                  {hasProfilePhoto ? "Profile photo selected" : "Change profile photo"}
+                  {hasProfilePhoto ? "Change profile photo" : "Upload profile photo"}
                 </Text>
                 <Text style={styles.profileHelperText}>
-                  Upload will connect to account storage later.
+                  JPG, PNG, WebP, or GIF. Saved to account storage.
                 </Text>
                 <Pressable
                   accessibilityRole="button"
@@ -612,6 +1018,9 @@ export default function SettingsScreen() {
                   value={privacy}
                   onChange={handlePrivacyChange}
                 />
+                <Text style={styles.privacyHelperText}>
+                  This controls whether age, height, weight, and date of birth are visible on your profile.
+                </Text>
               </View>
 
               <View style={[styles.settingsCard, { width: cardWidth }]}>
@@ -625,11 +1034,7 @@ export default function SettingsScreen() {
 
                 <View style={styles.dataActionGrid}>
                   <Pressable
-                    onPress={() =>
-                      setSettingsNotice(
-                        "Data export will be generated when backend storage is connected.",
-                      )
-                    }
+                    onPress={handleExportAccountData}
                     style={({ pressed }) => [
                       styles.dataActionButton,
                       pressed && styles.buttonPressed,
@@ -638,11 +1043,7 @@ export default function SettingsScreen() {
                     <Text style={styles.dataActionText}>Export data</Text>
                   </Pressable>
                   <Pressable
-                    onPress={() =>
-                      setSettingsNotice(
-                        "Account deletion will require confirmation once auth is connected.",
-                      )
-                    }
+                    onPress={handleDeleteAccount}
                     style={({ pressed }) => [
                       styles.dataActionButton,
                       styles.dangerActionButton,
@@ -656,7 +1057,10 @@ export default function SettingsScreen() {
                 </View>
 
                 <Pressable
-                  onPress={() => router.replace("/(auth)/login")}
+                  onPress={() => {
+                    clearSession();
+                    router.replace("/(auth)/login");
+                  }}
                   style={({ pressed }) => [
                     styles.logoutButton,
                     pressed && styles.buttonPressed,
@@ -836,6 +1240,27 @@ const styles = StyleSheet.create({
   dropdownMenuTextSelected: {
     color: "#4EA955",
   },
+  infoPanel: {
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  infoPanelTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  infoPanelText: {
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#7A8699",
+  },
   actionPanel: {
     marginTop: -6,
     marginBottom: 18,
@@ -966,6 +1391,33 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 10,
   },
+  profilePhotoSection: {
+    width: "100%",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  profilePhotoFrame: {
+    width: 112,
+    height: 112,
+    borderRadius: 56,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profilePhotoImage: {
+    width: "100%",
+    height: "100%",
+  },
+  profilePhotoPlaceholder: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F4FFF7",
+  },
   uploadButtonActive: {
     backgroundColor: "#4EA955",
     borderColor: "#4EA955",
@@ -994,11 +1446,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 14,
   },
+  profileTextarea: {
+    minHeight: 92,
+    borderRadius: 20,
+    paddingTop: 14,
+    paddingBottom: 14,
+    textAlignVertical: "top",
+  },
   saveProfileText: {
     fontSize: 11,
     fontWeight: "900",
     color: "#FFFFFF",
     textTransform: "uppercase",
+  },
+  privacyHelperText: {
+    marginTop: -4,
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#7A8699",
   },
   dataActionGrid: {
     flexDirection: "row",

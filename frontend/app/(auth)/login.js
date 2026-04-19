@@ -1,10 +1,7 @@
 /*
  * Login screen.
  *
- * The current version keeps authentication local so the app can be tested
- * before backend auth is wired. When the backend is ready, `handleLogin`
- * should call `authApi.loginUser`, store the returned token/session, then
- * route to the dashboard on success.
+ * Uses the backend auth API, stores the returned session, then routes into the app.
  */
 import { LinearGradient } from "expo-linear-gradient";
 import { Link, useRouter } from "expo-router";
@@ -22,15 +19,12 @@ import {
   View,
 } from "react-native";
 import useMobileFrame from "../../src/shared/hooks/useMobileFrame";
+import { loginUser, requestPasswordReset } from "../../src/services/api/authApi";
+import { getMyProfile } from "../../src/services/api/profileApi";
+import { saveSession } from "../../src/services/authSession";
 
 const CARD_GAP = 18;
 const SHIMMER_TRAVEL = 220;
-// Temporary credentials keep the UI testable until authApi.loginUser is connected.
-// Remove this constant once real auth replaces the frontend-only check.
-const MOCK_LOGIN = {
-  email: "demo@jhoom.app",
-  password: "password123",
-};
 
 export default function LoginScreen() {
   const {
@@ -53,6 +47,8 @@ export default function LoginScreen() {
   const [loginError, setLoginError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [forgotNotice, setForgotNotice] = useState("");
+  const [resetLink, setResetLink] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     // Reuses the landing-page shimmer motion for the primary login CTA.
@@ -81,6 +77,9 @@ export default function LoginScreen() {
     if (forgotNotice) {
       setForgotNotice("");
     }
+    if (resetLink) {
+      setResetLink("");
+    }
   }
 
   function handleEmailChange(value) {
@@ -93,11 +92,7 @@ export default function LoginScreen() {
     clearLoginError();
   }
 
-  function handleLogin() {
-    // This handler mirrors the final backend flow:
-    // 1. validate the form,
-    // 2. submit credentials,
-    // 3. show an error or route into the app.
+  async function handleLogin() {
     const normalisedEmail = email.trim().toLowerCase();
 
     if (!normalisedEmail || !password) {
@@ -105,22 +100,68 @@ export default function LoginScreen() {
       return;
     }
 
-    // Frontend-only auth gate for now. Replace this branch with authApi.loginUser.
-    const isAuthorised =
-      normalisedEmail === MOCK_LOGIN.email && password === MOCK_LOGIN.password;
+    try {
+      setIsSubmitting(true);
+      let session = await loginUser({
+        email: normalisedEmail,
+        password,
+      });
+      try {
+        const profile = await getMyProfile(session.token);
+        session = {
+          ...session,
+          user: {
+            ...(session.user || {}),
+            username: profile.username || session.user?.username,
+            email: profile.email || session.user?.email || normalisedEmail,
+            profile_picture_url: profile.profile_picture_url || "",
+          },
+        };
+      } catch {
+        // Keep login resilient even if the profile refresh fails.
+      }
+      saveSession(session);
+      setLoginError("");
+      router.replace("/dashboard");
+    } catch (error) {
+      setLoginError(error.message || "The details were incorrect.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
-    if (!isAuthorised) {
-      setLoginError("The details were incorrect.");
+  async function handleForgotPassword() {
+    const normalisedEmail = email.trim().toLowerCase();
+
+    setLoginError("");
+
+    if (!normalisedEmail) {
+      setLoginError("Enter your email first, then tap Forgot password.");
       return;
     }
 
-    setLoginError("");
-    router.replace("/dashboard");
+    try {
+      const response = await requestPasswordReset({ email: normalisedEmail });
+      setResetLink(response.resetUrl || "");
+      setForgotNotice(response.resetUrl
+        ? "Reset link created for dev. Open it below."
+        : response.message || "Check your email for a reset link.");
+    } catch (error) {
+      setLoginError(error.message || "Could not start password reset.");
+    }
   }
 
-  function handleForgotPassword() {
-    setLoginError("");
-    setForgotNotice("Password reset will be connected when authentication is live.");
+  function handleOpenResetLink() {
+    if (!resetLink) {
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(resetLink);
+      router.push(`${parsedUrl.pathname}${parsedUrl.search}`);
+    } catch {
+      router.push(resetLink);
+    }
   }
 
   return (
@@ -161,7 +202,7 @@ export default function LoginScreen() {
                   styles.contentStack,
                   {
                     width: formWidth,
-                    minHeight: isShortHeight ? 180 : 220,
+                    minHeight: isShortHeight ? 136 : 180,
                   },
                 ]}
               >
@@ -223,6 +264,20 @@ export default function LoginScreen() {
                     {forgotNotice ? (
                       <Text style={styles.noticeText}>{forgotNotice}</Text>
                     ) : null}
+
+                    {resetLink ? (
+                      <Pressable
+                        onPress={handleOpenResetLink}
+                        style={({ pressed }) => [
+                          styles.resetLinkButton,
+                          pressed && styles.buttonPressed,
+                        ]}
+                      >
+                        <Text style={styles.resetLinkButtonText}>
+                          Open reset page
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                 </View>
               </View>
@@ -239,10 +294,12 @@ export default function LoginScreen() {
 
               <Pressable
                 onPress={handleLogin}
+                disabled={isSubmitting}
                 style={({ pressed }) => [
                   styles.submitButton,
                   { width: formWidth },
-                  pressed && styles.buttonPressed,
+                  isSubmitting && styles.submitButtonDisabled,
+                  pressed && !isSubmitting && styles.buttonPressed,
                 ]}
               >
                 <View pointerEvents="none" style={styles.submitBackground}>
@@ -271,7 +328,7 @@ export default function LoginScreen() {
                   </Animated.View>
                 </View>
                 <Text style={[styles.submitText, isCompactWidth && styles.compactSubmitText]}>
-                  Log in
+                  {isSubmitting ? "Logging in..." : "Log in"}
                 </Text>
               </Pressable>
             </View>
@@ -321,16 +378,16 @@ const styles = StyleSheet.create({
     textShadowRadius: 14,
   },
   contentSection: {
-    flex: 1,
-    justifyContent: "flex-start",
+    flexGrow: 0,
+    justifyContent: "center",
     alignItems: "center",
   },
   contentStack: {
-    justifyContent: "flex-start",
+    justifyContent: "center",
     alignItems: "center",
   },
   formAnchor: {
-    justifyContent: "flex-start",
+    justifyContent: "center",
   },
   formSection: {
     gap: 16,
@@ -406,12 +463,27 @@ const styles = StyleSheet.create({
     color: "#4EA955",
     textAlign: "center",
   },
+  resetLinkButton: {
+    minHeight: 42,
+    borderRadius: 16,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  resetLinkButtonText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
   bottomSection: {
-    flex: 1,
+    flexGrow: 0,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 8,
-    paddingBottom: 14,
+    paddingTop: 22,
+    paddingBottom: 10,
     width: "100%",
   },
   compactBottomSection: {
@@ -440,6 +512,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     overflow: "hidden",
     position: "relative",
+  },
+  submitButtonDisabled: {
+    opacity: 0.72,
   },
   submitBackground: {
     ...StyleSheet.absoluteFillObject,

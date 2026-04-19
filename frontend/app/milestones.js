@@ -1,13 +1,11 @@
 /*
  * Milestones screen.
  *
- * Lets users create goals and see whether they have been met. Progress is
- * manual right now so the UI can be tested. Later, the backend should persist
- * milestones and calculate progress from logs, health integrations, and AI
- * plan targets.
+ * Structured goals are tied to fitness data where possible. Weight reads from
+ * profile weight, and weekly goal types read from the current week's logs.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Pressable,
@@ -21,62 +19,130 @@ import {
 import AppHeader from "../src/shared/ui/AppHeader";
 import BottomNav from "../src/shared/ui/BottomNav";
 import useMobileFrame from "../src/shared/hooks/useMobileFrame";
+import { getPagedCarouselIndex } from "../src/shared/utils/carousel";
+import {
+  createMilestone,
+  deleteMilestone,
+  getMilestones,
+  updateMilestone,
+} from "../src/services/api/milestonesApi";
+import { getAuthToken } from "../src/services/authSession";
 
 const CARD_SPACING = 18;
-// Categories control both the add/edit chips and each milestone icon.
-// Add new categories here if the app supports new goal types later.
-const milestoneCategories = [
-  { label: "Weight", icon: "scale-outline" },
-  { label: "Steps", icon: "walk-outline" },
-  { label: "Sleep", icon: "moon-outline" },
-  { label: "Workouts", icon: "barbell-outline" },
-  { label: "Calories", icon: "flame-outline" },
-  { label: "Custom", icon: "star-outline" },
+
+const goalTemplates = [
+  {
+    key: "weight",
+    label: "Weight",
+    icon: "scale-outline",
+    helper: "Uses your latest logged weight, or your profile weight if no weight log exists yet.",
+    buildDraft: () => ({
+      title: "",
+      targetDate: "",
+      targetWeightKg: "",
+    }),
+  },
+  {
+    key: "steps",
+    label: "Steps",
+    icon: "walk-outline",
+    helper: "Counts how many days this week hit your step target.",
+    buildDraft: () => ({
+      title: "",
+      targetDate: "",
+      dailyTarget: "",
+      targetDays: "",
+    }),
+  },
+  {
+    key: "sleep",
+    label: "Sleep",
+    icon: "moon-outline",
+    helper: "Counts how many nights this week hit your sleep goal.",
+    buildDraft: () => ({
+      title: "",
+      targetDate: "",
+      nightlyTargetHours: "",
+      targetDays: "",
+    }),
+  },
+  {
+    key: "workouts",
+    label: "Workouts",
+    icon: "barbell-outline",
+    helper: "Counts workout and cardio logs saved this week.",
+    buildDraft: () => ({
+      title: "",
+      targetDate: "",
+      targetSessions: "",
+    }),
+  },
+  {
+    key: "calories",
+    label: "Calories",
+    icon: "flame-outline",
+    helper: "Tracks calories burned from this week's movement logs.",
+    buildDraft: () => ({
+      title: "",
+      targetDate: "",
+      targetCalories: "",
+    }),
+  },
+  {
+    key: "custom",
+    label: "Custom",
+    icon: "star-outline",
+    helper: "Manual fallback for goals the app does not auto-track yet.",
+    buildDraft: () => ({
+      title: "",
+      targetDate: "",
+      detail: "",
+      targetValue: "",
+      currentValue: "",
+      unit: "",
+    }),
+  },
 ];
+
+const goalTemplateByKey = Object.fromEntries(
+  goalTemplates.map((template) => [template.key, template]),
+);
 
 const starterMilestones = [
-  // Local seed data demonstrates both completed and in-progress goal states.
   {
-    id: "weight-goal",
-    title: "Weight goal reached",
-    detail: "Reach 78kg",
-    progressLabel: "82%",
-    progress: 0.82,
-    icon: "scale-outline",
-    completed: false,
-  },
-  {
-    id: "sleep-streak",
-    title: "Sleep consistency",
-    detail: "7h+ sleep for 5 nights",
-    progressLabel: "5/5",
-    progress: 1,
-    icon: "moon-outline",
-    completed: true,
-  },
-  {
-    id: "steps-week",
-    title: "Steps target",
-    detail: "8k steps for 4 days",
+    id: "starter-workouts",
+    title: "Workout week",
+    detail: "Complete 4 workouts this week",
     progressLabel: "3/4",
     progress: 0.75,
-    icon: "walk-outline",
+    goalType: "workouts",
+    icon: "barbell-outline",
     completed: false,
+    isAutoTracked: true,
   },
   {
-    id: "workout-week",
-    title: "Workout week",
-    detail: "Complete 4 workouts",
-    progressLabel: "4/4",
-    progress: 1,
-    icon: "barbell-outline",
-    completed: true,
+    id: "starter-sleep",
+    title: "Sleep consistency",
+    detail: "7 h sleep for 5 nights",
+    progressLabel: "4/5",
+    progress: 0.8,
+    goalType: "sleep",
+    icon: "moon-outline",
+    completed: false,
+    isAutoTracked: true,
   },
 ];
 
+function buildDraft(goalType) {
+  return {
+    goalType,
+    ...goalTemplateByKey[goalType].buildDraft(),
+  };
+}
+
 function GoalSlide({ item, cardWidth }) {
-  // One milestone becomes one swipeable carousel card.
-  // Keeping it separate from the screen makes the carousel easier to tune.
+  const template = goalTemplateByKey[item.goalType] || goalTemplateByKey.custom;
+
   return (
     <View style={[styles.goalSlide, { width: cardWidth }]}>
       <View style={styles.goalHeader}>
@@ -85,7 +151,7 @@ function GoalSlide({ item, cardWidth }) {
           <Text style={styles.sectionTitle}>{item.title}</Text>
         </View>
         <View style={styles.goalIcon}>
-          <Ionicons name={item.icon} size={20} color="#4EA955" />
+          <Ionicons name={template.icon} size={20} color="#4EA955" />
         </View>
       </View>
 
@@ -104,11 +170,133 @@ function GoalSlide({ item, cardWidth }) {
               item.completed && styles.statusPillTextComplete,
             ]}
           >
-            {item.completed ? "Met" : "In progress"}
+            {item.completed ? "Met" : item.isAutoTracked ? "Auto" : "Manual"}
           </Text>
         </View>
       </View>
     </View>
+  );
+}
+
+function GoalTypeFields({ draft, onChange }) {
+  if (draft.goalType === "weight") {
+    return (
+      <TextInput
+        value={draft.targetWeightKg}
+        onChangeText={(value) => onChange("targetWeightKg", value)}
+        placeholder="Target weight (kg)..."
+        placeholderTextColor="#7A8699"
+        keyboardType="decimal-pad"
+        style={styles.input}
+      />
+    );
+  }
+
+  if (draft.goalType === "steps") {
+    return (
+      <>
+        <TextInput
+          value={draft.dailyTarget}
+          onChangeText={(value) => onChange("dailyTarget", value)}
+          placeholder="Daily target (steps)..."
+          placeholderTextColor="#7A8699"
+          keyboardType="number-pad"
+          style={styles.input}
+        />
+        <TextInput
+          value={draft.targetDays}
+          onChangeText={(value) => onChange("targetDays", value)}
+          placeholder="Target days this week..."
+          placeholderTextColor="#7A8699"
+          keyboardType="number-pad"
+          style={styles.input}
+        />
+      </>
+    );
+  }
+
+  if (draft.goalType === "sleep") {
+    return (
+      <>
+        <TextInput
+          value={draft.nightlyTargetHours}
+          onChangeText={(value) => onChange("nightlyTargetHours", value)}
+          placeholder="Nightly target (hours)..."
+          placeholderTextColor="#7A8699"
+          keyboardType="decimal-pad"
+          style={styles.input}
+        />
+        <TextInput
+          value={draft.targetDays}
+          onChangeText={(value) => onChange("targetDays", value)}
+          placeholder="Target nights this week..."
+          placeholderTextColor="#7A8699"
+          keyboardType="number-pad"
+          style={styles.input}
+        />
+      </>
+    );
+  }
+
+  if (draft.goalType === "workouts") {
+    return (
+      <TextInput
+        value={draft.targetSessions}
+        onChangeText={(value) => onChange("targetSessions", value)}
+        placeholder="Workout sessions this week..."
+        placeholderTextColor="#7A8699"
+        keyboardType="number-pad"
+        style={styles.input}
+      />
+    );
+  }
+
+  if (draft.goalType === "calories") {
+    return (
+      <TextInput
+        value={draft.targetCalories}
+        onChangeText={(value) => onChange("targetCalories", value)}
+        placeholder="Calories burned this week (kcal)..."
+        placeholderTextColor="#7A8699"
+        keyboardType="number-pad"
+        style={styles.input}
+      />
+    );
+  }
+
+  return (
+    <>
+      <TextInput
+        value={draft.detail}
+        onChangeText={(value) => onChange("detail", value)}
+        placeholder="Target detail..."
+        placeholderTextColor="#7A8699"
+        style={styles.input}
+      />
+      <TextInput
+        value={draft.targetValue}
+        onChangeText={(value) => onChange("targetValue", value)}
+        placeholder="Target value..."
+        placeholderTextColor="#7A8699"
+        keyboardType="decimal-pad"
+        style={styles.input}
+      />
+      <TextInput
+        value={draft.currentValue}
+        onChangeText={(value) => onChange("currentValue", value)}
+        placeholder="Current value..."
+        placeholderTextColor="#7A8699"
+        keyboardType="decimal-pad"
+        style={styles.input}
+      />
+      <TextInput
+        value={draft.unit}
+        onChangeText={(value) => onChange("unit", value)}
+        placeholder="Unit..."
+        placeholderTextColor="#7A8699"
+        style={styles.input}
+      />
+    </>
   );
 }
 
@@ -124,12 +312,10 @@ export default function MilestonesScreen() {
     cardWidth,
   } = useMobileFrame();
   const [activeGoalIndex, setActiveGoalIndex] = useState(0);
-  const [milestones, setMilestones] = useState(starterMilestones);
-  const [newMilestoneTitle, setNewMilestoneTitle] = useState("");
-  const [newMilestoneTarget, setNewMilestoneTarget] = useState("");
-  const [newMilestoneDate, setNewMilestoneDate] = useState("");
-  const [newMilestoneCategory, setNewMilestoneCategory] = useState("Custom");
+  const [milestones, setMilestones] = useState([]);
+  const [draft, setDraft] = useState(() => buildDraft("workouts"));
   const [editingMilestoneId, setEditingMilestoneId] = useState(null);
+  const [notice, setNotice] = useState("");
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
   }).current;
@@ -139,96 +325,226 @@ export default function MilestonesScreen() {
     }
   }).current;
 
-  function resetMilestoneForm() {
-    setNewMilestoneTitle("");
-    setNewMilestoneTarget("");
-    setNewMilestoneDate("");
-    setNewMilestoneCategory("Custom");
-    setEditingMilestoneId(null);
+  function handleGoalScroll(event) {
+    setActiveGoalIndex(getPagedCarouselIndex(event, sliderWidth, milestones.length));
   }
 
-  function handleSaveMilestone() {
-    // This single save handler covers both creating and editing milestones.
-    // A backend version should call createMilestone for new items and
-    // updateMilestone for existing items, then refresh local state from the response.
-    const title = newMilestoneTitle.trim();
-    const target = newMilestoneTarget.trim();
-    const targetDate = newMilestoneDate.trim();
-    const category = milestoneCategories.find(
-      (item) => item.label === newMilestoneCategory,
-    ) ?? milestoneCategories[milestoneCategories.length - 1];
+  useEffect(() => {
+    loadMilestones();
+  }, []);
 
-    if (!title && !target) {
+  async function loadMilestones() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in to sync milestones.");
+      setMilestones(starterMilestones);
       return;
     }
 
-    // Milestones are local for now. Later, real log data and the AI health plan
-    // should update progress and completion automatically.
-    setMilestones((current) => {
-      const nextMilestone = {
-        id: editingMilestoneId ?? `milestone-${Date.now()}`,
-        title: title || "New milestone",
-        detail: target || "Custom target",
-        targetDate,
-        category: category.label,
-        progressLabel: "0%",
-        progress: 0,
-        icon: category.icon,
-        completed: false,
-      };
-
-      if (editingMilestoneId) {
-        return current.map((milestone) =>
-          milestone.id === editingMilestoneId
-            ? {
-                ...milestone,
-                ...nextMilestone,
-                completed: milestone.completed,
-                progress: milestone.progress,
-                progressLabel: milestone.progressLabel,
-              }
-            : milestone,
-        );
-      }
-
-      return [nextMilestone, ...current];
-    });
-    resetMilestoneForm();
-    setActiveGoalIndex(0);
-  }
-
-  function handleEditMilestone(milestone) {
-    setNewMilestoneTitle(milestone.title);
-    setNewMilestoneTarget(milestone.detail);
-    setNewMilestoneDate(milestone.targetDate ?? "");
-    setNewMilestoneCategory(milestone.category ?? "Custom");
-    setEditingMilestoneId(milestone.id);
-  }
-
-  function handleDeleteMilestone(id) {
-    setMilestones((current) => current.filter((milestone) => milestone.id !== id));
-
-    if (editingMilestoneId === id) {
-      resetMilestoneForm();
+    try {
+      setMilestones(await getMilestones(token));
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message || "Could not load milestones.");
+      setMilestones(starterMilestones);
     }
   }
 
-  function handleToggleMilestone(id) {
-    // Manual toggle for now; backend log data can calculate progress automatically later.
-    // This gives the frontend a visible completed/in-progress interaction today.
-    setMilestones((current) =>
-      current.map((milestone) =>
-        milestone.id === id
-          ? {
-              ...milestone,
-              completed: !milestone.completed,
-              progress: milestone.completed ? 0.5 : 1,
-              progressLabel: milestone.completed ? "50%" : "Met",
-            }
-          : milestone,
-      ),
-    );
+  function resetMilestoneForm(goalType = draft.goalType) {
+    setDraft(buildDraft(goalType));
+    setEditingMilestoneId(null);
   }
+
+  function handleDraftChange(field, value) {
+    setDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    if (notice) {
+      setNotice("");
+    }
+  }
+
+  function handleSelectGoalType(goalType) {
+    setDraft(buildDraft(goalType));
+    setEditingMilestoneId(null);
+    setNotice("");
+  }
+
+  function buildMilestonePayload() {
+    const title = draft.title.trim() || goalTemplateByKey[draft.goalType].label;
+    const targetDate = draft.targetDate.trim();
+
+    if (draft.goalType === "weight") {
+      return {
+        goalType: "weight",
+        title,
+        targetDate,
+        targetWeightKg: Number(draft.targetWeightKg),
+      };
+    }
+
+    if (draft.goalType === "steps") {
+      return {
+        goalType: "steps",
+        title,
+        targetDate,
+        dailyTarget: Number(draft.dailyTarget),
+        targetDays: Number(draft.targetDays),
+      };
+    }
+
+    if (draft.goalType === "sleep") {
+      return {
+        goalType: "sleep",
+        title,
+        targetDate,
+        nightlyTargetHours: Number(draft.nightlyTargetHours),
+        targetDays: Number(draft.targetDays),
+      };
+    }
+
+    if (draft.goalType === "workouts") {
+      return {
+        goalType: "workouts",
+        title,
+        targetDate,
+        targetSessions: Number(draft.targetSessions),
+      };
+    }
+
+    if (draft.goalType === "calories") {
+      return {
+        goalType: "calories",
+        title,
+        targetDate,
+        targetCalories: Number(draft.targetCalories),
+      };
+    }
+
+    return {
+      goalType: "custom",
+      title,
+      targetDate,
+      detail: draft.detail.trim() || "Custom target",
+      targetValue: Number(draft.targetValue),
+      currentValue: Number(draft.currentValue),
+      unit: draft.unit.trim() || "target",
+    };
+  }
+
+  async function handleSaveMilestone() {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in again before saving milestones.");
+      return;
+    }
+
+    try {
+      const payload = buildMilestonePayload();
+      const savedMilestone = editingMilestoneId
+        ? await updateMilestone(token, editingMilestoneId, payload)
+        : await createMilestone(token, payload);
+
+      setMilestones((current) => {
+        if (editingMilestoneId) {
+          return current.map((milestone) =>
+            milestone.id === editingMilestoneId ? savedMilestone : milestone
+          );
+        }
+
+        return [savedMilestone, ...current];
+      });
+
+      resetMilestoneForm(draft.goalType);
+      setActiveGoalIndex(0);
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message || "Could not save milestone.");
+    }
+  }
+
+  function handleEditMilestone(milestone) {
+    const baseDraft = buildDraft(milestone.goalType || "custom");
+    const config = milestone.config || {};
+
+    setDraft({
+      ...baseDraft,
+      goalType: milestone.goalType || "custom",
+      title: milestone.title || baseDraft.title,
+      targetDate: milestone.targetDate || "",
+      targetWeightKg: config.targetWeightKg ? String(config.targetWeightKg) : baseDraft.targetWeightKg,
+      dailyTarget: config.dailyTarget ? String(config.dailyTarget) : baseDraft.dailyTarget,
+      targetDays: config.targetDays ? String(config.targetDays) : baseDraft.targetDays,
+      nightlyTargetHours: config.nightlyTargetHours
+        ? String(config.nightlyTargetHours)
+        : baseDraft.nightlyTargetHours,
+      targetSessions: config.targetSessions
+        ? String(config.targetSessions)
+        : baseDraft.targetSessions,
+      targetCalories: config.targetCalories
+        ? String(config.targetCalories)
+        : baseDraft.targetCalories,
+      detail: milestone.detail || baseDraft.detail,
+      targetValue: milestone.targetValue != null ? String(milestone.targetValue) : baseDraft.targetValue,
+      currentValue: milestone.currentValue != null ? String(milestone.currentValue) : baseDraft.currentValue,
+      unit: milestone.unit || baseDraft.unit,
+    });
+    setEditingMilestoneId(milestone.id);
+    setNotice("");
+  }
+
+  async function handleDeleteMilestone(id) {
+    const token = getAuthToken();
+
+    if (!token) {
+      setNotice("Log in again before deleting milestones.");
+      return;
+    }
+
+    try {
+      await deleteMilestone(token, id);
+      setMilestones((current) => current.filter((milestone) => milestone.id !== id));
+
+      if (editingMilestoneId === id) {
+        resetMilestoneForm();
+      }
+    } catch (error) {
+      setNotice(error.message || "Could not delete milestone.");
+    }
+  }
+
+  async function handleToggleCustomMilestone(id) {
+    const token = getAuthToken();
+    const milestone = milestones.find((item) => item.id === id);
+
+    if (!token || !milestone || milestone.isAutoTracked) {
+      return;
+    }
+
+    try {
+      const updated = await updateMilestone(token, id, {
+        goalType: "custom",
+        title: milestone.title,
+        detail: milestone.detail,
+        targetDate: milestone.targetDate,
+        targetValue: milestone.targetValue || 1,
+        currentValue: milestone.completed ? 0 : milestone.targetValue || 1,
+        unit: milestone.unit || "target",
+        completed: !milestone.completed,
+      });
+
+      setMilestones((current) =>
+        current.map((item) => (item.id === id ? updated : item))
+      );
+    } catch (error) {
+      setNotice(error.message || "Could not update milestone.");
+    }
+  }
+
+  const activeTemplate = goalTemplateByKey[draft.goalType] || goalTemplateByKey.custom;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -251,7 +567,7 @@ export default function MilestonesScreen() {
             style={[
               styles.inner,
               {
-                minHeight: Math.max(shellMinHeight, 900),
+                minHeight: Math.max(shellMinHeight, 920),
                 paddingHorizontal: innerPaddingHorizontal,
                 paddingTop: innerPaddingTop,
                 paddingBottom: innerPaddingBottom,
@@ -273,7 +589,10 @@ export default function MilestonesScreen() {
                   renderItem={({ item }) => (
                     <GoalSlide item={item} cardWidth={cardWidth} />
                   )}
+                  onScroll={handleGoalScroll}
+                  onMomentumScrollEnd={handleGoalScroll}
                   viewabilityConfig={viewabilityConfig}
+                  scrollEventThrottle={16}
                   onViewableItemsChanged={onViewableItemsChanged}
                 />
 
@@ -302,13 +621,13 @@ export default function MilestonesScreen() {
                 </View>
 
                 <View style={styles.categoryGrid}>
-                  {milestoneCategories.map((category) => {
-                    const isSelected = newMilestoneCategory === category.label;
+                  {goalTemplates.map((template) => {
+                    const isSelected = draft.goalType === template.key;
 
                     return (
                       <Pressable
-                        key={category.label}
-                        onPress={() => setNewMilestoneCategory(category.label)}
+                        key={template.key}
+                        onPress={() => handleSelectGoalType(template.key)}
                         style={({ pressed }) => [
                           styles.categoryChip,
                           isSelected && styles.categoryChipSelected,
@@ -316,7 +635,7 @@ export default function MilestonesScreen() {
                         ]}
                       >
                         <Ionicons
-                          name={category.icon}
+                          name={template.icon}
                           size={14}
                           color={isSelected ? "#FFFFFF" : "#4EA955"}
                         />
@@ -326,54 +645,46 @@ export default function MilestonesScreen() {
                             isSelected && styles.categoryChipTextSelected,
                           ]}
                         >
-                          {category.label}
+                          {template.label}
                         </Text>
                       </Pressable>
                     );
                   })}
                 </View>
 
+                <Text style={styles.helperText}>{activeTemplate.helper}</Text>
+
                 <TextInput
-                  value={newMilestoneTitle}
-                  onChangeText={setNewMilestoneTitle}
-                  placeholder="Milestone name..."
+                  value={draft.title}
+                  onChangeText={(value) => handleDraftChange("title", value)}
+                  placeholder="Goal name..."
                   placeholderTextColor="#7A8699"
                   style={styles.input}
                 />
 
-                <TextInput
-                  value={newMilestoneTarget}
-                  onChangeText={setNewMilestoneTarget}
-                  placeholder="Target eg lose 2kg, 4 workouts..."
-                  placeholderTextColor="#7A8699"
-                  style={styles.input}
-                />
+                <GoalTypeFields draft={draft} onChange={handleDraftChange} />
 
                 <TextInput
-                  value={newMilestoneDate}
-                  onChangeText={setNewMilestoneDate}
+                  value={draft.targetDate}
+                  onChangeText={(value) => handleDraftChange("targetDate", value)}
                   placeholder="Target date eg 30/05/2026..."
                   placeholderTextColor="#7A8699"
                   style={styles.input}
                 />
 
                 <View style={styles.cardFooter}>
-                  <Text style={styles.helperText}>Progress can connect to logs later.</Text>
+                  <Text style={styles.helperText}>
+                    Weekly goals update from current-week logs. Weight goals read from your latest logged weight.
+                  </Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={
                       editingMilestoneId ? "Update milestone" : "Add milestone"
                     }
-                    disabled={!newMilestoneTitle.trim() && !newMilestoneTarget.trim()}
                     onPress={handleSaveMilestone}
                     style={({ pressed }) => [
                       styles.addButton,
-                      !newMilestoneTitle.trim() &&
-                        !newMilestoneTarget.trim() &&
-                        styles.addButtonDisabled,
-                      pressed &&
-                        (newMilestoneTitle.trim() || newMilestoneTarget.trim()) &&
-                        styles.buttonPressed,
+                      pressed && styles.buttonPressed,
                     ]}
                   >
                     <Text style={styles.addButtonText}>
@@ -384,7 +695,7 @@ export default function MilestonesScreen() {
 
                 {editingMilestoneId ? (
                   <Pressable
-                    onPress={resetMilestoneForm}
+                    onPress={() => resetMilestoneForm()}
                     style={({ pressed }) => [
                       styles.cancelEditButton,
                       pressed && styles.buttonPressed,
@@ -393,63 +704,82 @@ export default function MilestonesScreen() {
                     <Text style={styles.cancelEditText}>Cancel edit</Text>
                   </Pressable>
                 ) : null}
+
+                {notice ? (
+                  <Text style={styles.inlineNotice}>{notice}</Text>
+                ) : null}
               </View>
 
               <View style={[styles.milestoneGrid, { width: cardWidth }]}>
-                {milestones.map((milestone) => (
-                  <View key={milestone.id} style={styles.milestoneTile}>
-                    <View style={styles.tileIcon}>
-                      <Ionicons
-                        name={milestone.completed ? "star" : milestone.icon}
-                        size={20}
-                        color="#4EA955"
-                      />
-                    </View>
-                    <Text style={styles.tileTitle}>{milestone.title}</Text>
-                    <Text style={styles.tileDetail}>{milestone.detail}</Text>
-                    {milestone.targetDate ? (
-                      <Text style={styles.tileDate}>By {milestone.targetDate}</Text>
-                    ) : null}
-                    <Text style={styles.tileStatus}>
-                      {milestone.completed ? "Met" : milestone.progressLabel}
-                    </Text>
+                {milestones.map((milestone) => {
+                  const template = goalTemplateByKey[milestone.goalType] || goalTemplateByKey.custom;
 
-                    <View style={styles.tileActions}>
-                      <Pressable
-                        onPress={() => handleToggleMilestone(milestone.id)}
-                        style={({ pressed }) => [
-                          styles.tileActionButton,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Text style={styles.tileActionText}>
-                          {milestone.completed ? "Undo" : "Met"}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => handleEditMilestone(milestone)}
-                        style={({ pressed }) => [
-                          styles.tileActionButton,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Text style={styles.tileActionText}>Edit</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => handleDeleteMilestone(milestone.id)}
-                        style={({ pressed }) => [
-                          styles.tileActionButton,
-                          styles.tileDeleteButton,
-                          pressed && styles.buttonPressed,
-                        ]}
-                      >
-                        <Text style={[styles.tileActionText, styles.tileDeleteText]}>
-                          Del
-                        </Text>
-                      </Pressable>
+                  return (
+                    <View key={milestone.id} style={styles.milestoneTile}>
+                      <View style={styles.tileIcon}>
+                        <Ionicons
+                          name={milestone.completed ? "star" : template.icon}
+                          size={20}
+                          color="#4EA955"
+                        />
+                      </View>
+                      <Text style={styles.tileTitle}>{milestone.title}</Text>
+                      <Text style={styles.tileDetail}>{milestone.detail}</Text>
+                      {milestone.targetDate ? (
+                        <Text style={styles.tileDate}>By {milestone.targetDate}</Text>
+                      ) : null}
+                      <Text style={styles.tileStatus}>
+                        {milestone.progressLabel}
+                      </Text>
+
+                      <View style={styles.progressTrackCompact}>
+                        <View
+                          style={[
+                            styles.progressFill,
+                            { width: `${(milestone.progress || 0) * 100}%` },
+                          ]}
+                        />
+                      </View>
+
+                      <View style={styles.tileActions}>
+                        {!milestone.isAutoTracked ? (
+                          <Pressable
+                            onPress={() => handleToggleCustomMilestone(milestone.id)}
+                            style={({ pressed }) => [
+                              styles.tileActionButton,
+                              pressed && styles.buttonPressed,
+                            ]}
+                          >
+                            <Text style={styles.tileActionText}>
+                              {milestone.completed ? "Undo" : "Met"}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                        <Pressable
+                          onPress={() => handleEditMilestone(milestone)}
+                          style={({ pressed }) => [
+                            styles.tileActionButton,
+                            pressed && styles.buttonPressed,
+                          ]}
+                        >
+                          <Text style={styles.tileActionText}>Edit</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => handleDeleteMilestone(milestone.id)}
+                          style={({ pressed }) => [
+                            styles.tileActionButton,
+                            styles.tileDeleteButton,
+                            pressed && styles.buttonPressed,
+                          ]}
+                        >
+                          <Text style={[styles.tileActionText, styles.tileDeleteText]}>
+                            Del
+                          </Text>
+                        </Pressable>
+                      </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             </View>
 
@@ -553,6 +883,15 @@ const styles = StyleSheet.create({
     borderColor: "#DDF4E4",
     overflow: "hidden",
   },
+  progressTrackCompact: {
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: "#F4FFF7",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    overflow: "hidden",
+    marginBottom: 12,
+  },
   progressFill: {
     height: "100%",
     borderRadius: 999,
@@ -652,6 +991,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: "700",
     color: "#7A8699",
+    marginBottom: 12,
+  },
+  inlineNotice: {
+    marginTop: 12,
+    fontSize: 10,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: "#4EA955",
   },
   addButton: {
     minWidth: 76,
@@ -661,9 +1008,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 18,
-  },
-  addButtonDisabled: {
-    backgroundColor: "#A8C995",
   },
   addButtonText: {
     fontSize: 12,
@@ -690,74 +1034,69 @@ const styles = StyleSheet.create({
   milestoneGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 14,
+    gap: 12,
   },
   milestoneTile: {
     width: "48%",
-    minHeight: 196,
     borderRadius: 24,
+    backgroundColor: "#ECFDF3",
+    borderWidth: 1,
+    borderColor: "#CFEFD9",
+    padding: 14,
+  },
+  tileIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#DDF4E4",
-    paddingHorizontal: 12,
-    paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
-  },
-  tileIcon: {
-    marginBottom: 10,
+    marginBottom: 12,
   },
   tileTitle: {
-    fontSize: 10,
-    fontWeight: "900",
-    color: "#83B66E",
-    textAlign: "center",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-    lineHeight: 14,
-  },
-  tileDetail: {
-    marginTop: 6,
     fontSize: 12,
-    lineHeight: 17,
     fontWeight: "800",
     color: "#111827",
-    textAlign: "center",
+    marginBottom: 6,
   },
-  tileStatus: {
-    marginTop: 8,
-    fontSize: 10,
+  tileDetail: {
+    fontSize: 11,
+    lineHeight: 18,
     fontWeight: "700",
-    color: "#7A8699",
-    textTransform: "uppercase",
+    color: "#3F4858",
+    marginBottom: 6,
   },
   tileDate: {
-    marginTop: 5,
-    fontSize: 9,
-    lineHeight: 13,
-    fontWeight: "900",
+    fontSize: 10,
+    fontWeight: "700",
     color: "#83B66E",
-    textAlign: "center",
     textTransform: "uppercase",
+    marginBottom: 6,
+  },
+  tileStatus: {
+    fontSize: 11,
+    fontWeight: "900",
+    color: "#111827",
+    marginBottom: 8,
   },
   tileActions: {
     flexDirection: "row",
-    gap: 6,
-    marginTop: 10,
+    gap: 8,
   },
   tileActionButton: {
-    minHeight: 28,
+    flex: 1,
+    minHeight: 32,
     borderRadius: 999,
-    backgroundColor: "#F4FFF7",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#DDF4E4",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 8,
   },
   tileActionText: {
-    fontSize: 8,
+    fontSize: 9,
     fontWeight: "900",
     color: "#4EA955",
     textTransform: "uppercase",
@@ -771,19 +1110,20 @@ const styles = StyleSheet.create({
   },
   dotsRow: {
     flexDirection: "row",
-    justifyContent: "center",
     alignItems: "center",
-    marginTop: 18,
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: "#D7DEE8",
-    marginHorizontal: 5,
+    backgroundColor: "#D1D5DB",
   },
   activeDot: {
-    backgroundColor: "#111827",
+    width: 20,
+    backgroundColor: "#4EA955",
   },
   buttonPressed: {
     opacity: 0.9,

@@ -1,15 +1,13 @@
 /*
  * Social post detail screen.
  *
- * Displays one post with comments and simple reaction controls. The route uses
- * the dynamic `[id]` segment so a feed card can deep-link to a specific post.
- * Later, the post, comments, likes, and moderation state should be fetched from
- * `socialApi` by this id.
+ * Displays a single post with real likes, comments, and reporting actions.
  */
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -21,6 +19,32 @@ import {
 import AppHeader from "../../../src/shared/ui/AppHeader";
 import BottomNav from "../../../src/shared/ui/BottomNav";
 import useMobileFrame from "../../../src/shared/hooks/useMobileFrame";
+import { resolveApiAssetUrl } from "../../../src/services/api/client";
+import {
+  addComment,
+  deleteComment,
+  getSocialPost,
+  reportContent,
+  togglePostLike,
+} from "../../../src/services/api/socialApi";
+import { getAuthToken } from "../../../src/services/authSession";
+
+function Avatar({ imageUrl, size = 36, iconSize = 16 }) {
+  const resolvedImageUrl = resolveApiAssetUrl(imageUrl);
+
+  return (
+    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
+      {resolvedImageUrl ? (
+        <Image
+          source={{ uri: resolvedImageUrl }}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+        />
+      ) : (
+        <Ionicons name="person-outline" size={iconSize} color="#4EA955" />
+      )}
+    </View>
+  );
+}
 
 export default function SocialPostScreen() {
   const { id } = useLocalSearchParams();
@@ -33,33 +57,105 @@ export default function SocialPostScreen() {
     shellMinHeight,
     cardWidth,
   } = useMobileFrame();
-  const [comments, setComments] = useState([
-    { id: "comment-1", author: "Maya", text: "Strong update." },
-    { id: "comment-2", author: "You", text: "Nice work this week." },
-  ]);
+  const [post, setPost] = useState(null);
   const [draft, setDraft] = useState("");
-  const [liked, setLiked] = useState(false);
+  const [notice, setNotice] = useState("");
 
-  function handleAddComment() {
-    // Mirrors the feed comment flow for a single-post detail route.
-    // Replace this local append with socialApi.addComment when persistence exists.
-    const trimmedDraft = draft.trim();
+  const loadPost = useCallback(async () => {
+    const token = getAuthToken();
 
-    if (!trimmedDraft) {
+    if (!token || !id) {
+      setNotice("Log in to view this post.");
       return;
     }
 
-    setComments((current) => [
-      ...current,
-      { id: `comment-${Date.now()}`, author: "You", text: trimmedDraft },
-    ]);
-    setDraft("");
+    try {
+      setPost(await getSocialPost(token, id));
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message || "Could not load this post.");
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadPost();
+  }, [loadPost]);
+
+  async function handleAddComment() {
+    const token = getAuthToken();
+    const trimmedDraft = draft.trim();
+
+    if (!token || !trimmedDraft || !post) {
+      return;
+    }
+
+    try {
+      const savedComment = await addComment(token, post.id, { text: trimmedDraft });
+      setPost((current) => ({
+        ...current,
+        comments: [...(current.comments || []), savedComment],
+      }));
+      setDraft("");
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message || "Could not save comment.");
+    }
   }
 
-  function handleDeleteComment(commentId) {
-    // Local delete for comments authored by the current user.
-    // Backend permissions should decide who is allowed to delete which comments.
-    setComments((current) => current.filter((comment) => comment.id !== commentId));
+  async function handleDeleteComment(commentId) {
+    const token = getAuthToken();
+
+    if (!token || !post) {
+      return;
+    }
+
+    try {
+      await deleteComment(token, post.id, commentId);
+      setPost((current) => ({
+        ...current,
+        comments: current.comments.filter((comment) => comment.id !== commentId),
+      }));
+      setNotice("");
+    } catch (error) {
+      setNotice(error.message || "Could not delete comment.");
+    }
+  }
+
+  async function handleToggleLike() {
+    const token = getAuthToken();
+
+    if (!token || !post) {
+      return;
+    }
+
+    try {
+      const nextLike = await togglePostLike(token, post.id);
+      setPost((current) => ({
+        ...current,
+        likedByMe: nextLike.likedByMe,
+        likeCount: nextLike.likeCount,
+      }));
+    } catch (error) {
+      setNotice(error.message || "Could not update like.");
+    }
+  }
+
+  async function handleReportPost() {
+    const token = getAuthToken();
+
+    if (!token || !post) {
+      return;
+    }
+
+    try {
+      await reportContent(token, {
+        postId: post.id,
+        reason: "Reported from post detail",
+      });
+      setNotice("Post reported.");
+    } catch (error) {
+      setNotice(error.message || "Could not report this post.");
+    }
   }
 
   return (
@@ -92,82 +188,108 @@ export default function SocialPostScreen() {
             <AppHeader title="POST." />
 
             <View style={[styles.card, { width: cardWidth }]}>
-              <View style={styles.postHeader}>
-                <View style={styles.avatar}>
-                  <Ionicons name="person-outline" size={16} color="#4EA955" />
-                </View>
-                <View>
-                  <Text style={styles.name}>Weekly post</Text>
-                  <Text style={styles.username}>Post #{id ?? "preview"}</Text>
-                </View>
-              </View>
+              {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
-              <View style={styles.imageBox}>
-                <Ionicons name="image-outline" size={30} color="#FFFFFF" />
-              </View>
+              {post ? (
+                <>
+                  <View style={styles.postHeader}>
+                    <Avatar imageUrl={post.authorProfilePictureUrl} />
+                    <View>
+                      <Text style={styles.name}>{post.authorName}</Text>
+                      <Text style={styles.username}>@{post.username}</Text>
+                    </View>
+                  </View>
 
-              <Text style={styles.caption}>
-                Post detail view with comments, reactions, and moderation controls.
-              </Text>
+                  {post.imageUrl ? (
+                    <Image
+                      source={{ uri: resolveApiAssetUrl(post.imageUrl) }}
+                      style={styles.imageBox}
+                    />
+                  ) : (
+                    <View style={[styles.imageBox, styles.imagePlaceholder]}>
+                      <Ionicons name="image-outline" size={30} color="#FFFFFF" />
+                    </View>
+                  )}
 
-              <View style={styles.actionRow}>
-                <Pressable
-                  onPress={() => setLiked((current) => !current)}
-                  style={({ pressed }) => [
-                    styles.actionButton,
-                    liked && styles.actionButtonActive,
-                    pressed && styles.buttonPressed,
-                  ]}
-                >
-                  <Ionicons
-                    name={liked ? "heart" : "heart-outline"}
-                    size={15}
-                    color={liked ? "#FFFFFF" : "#4EA955"}
-                  />
-                  <Text style={[styles.actionText, liked && styles.actionTextActive]}>
-                    Like
-                  </Text>
-                </Pressable>
-                <Pressable style={styles.actionButton}>
-                  <Text style={styles.actionText}>Report</Text>
-                </Pressable>
-              </View>
+                  <Text style={styles.caption}>{post.caption}</Text>
 
-              <View style={styles.commentsBox}>
-                <Text style={styles.commentsTitle}>Comments</Text>
-                {comments.map((comment) => (
-                  <View key={comment.id} style={styles.commentRow}>
-                    <Text style={styles.commentText}>
-                      <Text style={styles.commentAuthor}>{comment.author}: </Text>
-                      {comment.text}
-                    </Text>
-                    {comment.author === "You" ? (
-                      <Pressable onPress={() => handleDeleteComment(comment.id)}>
-                        <Text style={styles.deleteText}>Delete</Text>
+                  <View style={styles.actionRow}>
+                    <Pressable
+                      onPress={handleToggleLike}
+                      style={({ pressed }) => [
+                        styles.actionButton,
+                        post.likedByMe && styles.actionButtonActive,
+                        pressed && styles.buttonPressed,
+                      ]}
+                    >
+                      <Ionicons
+                        name={post.likedByMe ? "heart" : "heart-outline"}
+                        size={15}
+                        color={post.likedByMe ? "#FFFFFF" : "#4EA955"}
+                      />
+                      <Text style={[styles.actionText, post.likedByMe && styles.actionTextActive]}>
+                        Like {post.likeCount ? `(${post.likeCount})` : ""}
+                      </Text>
+                    </Pressable>
+                    {!post.isMine ? (
+                      <Pressable
+                        onPress={handleReportPost}
+                        style={({ pressed }) => [
+                          styles.actionButton,
+                          pressed && styles.buttonPressed,
+                        ]}
+                      >
+                        <Text style={styles.actionText}>Report</Text>
                       </Pressable>
                     ) : null}
                   </View>
-                ))}
 
-                <View style={styles.commentInputRow}>
-                  <TextInput
-                    value={draft}
-                    onChangeText={setDraft}
-                    placeholder="Add comment..."
-                    placeholderTextColor="#7A8699"
-                    style={styles.commentInput}
-                  />
-                  <Pressable
-                    onPress={handleAddComment}
-                    style={({ pressed }) => [
-                      styles.sendButton,
-                      pressed && styles.buttonPressed,
-                    ]}
-                  >
-                    <Ionicons name="send-outline" size={16} color="#FFFFFF" />
-                  </Pressable>
-                </View>
-              </View>
+                  <View style={styles.commentsBox}>
+                    <Text style={styles.commentsTitle}>Comments</Text>
+                    {(post.comments || []).map((comment) => (
+                      <View key={comment.id} style={styles.commentRow}>
+                        <Avatar
+                          imageUrl={comment.authorProfilePictureUrl}
+                          size={28}
+                          iconSize={13}
+                        />
+                        <View style={styles.commentCopy}>
+                          <Text style={styles.commentText}>
+                            <Text style={styles.commentAuthor}>{comment.author}: </Text>
+                            {comment.text}
+                          </Text>
+                        </View>
+                        {comment.isMine ? (
+                          <Pressable onPress={() => handleDeleteComment(comment.id)}>
+                            <Text style={styles.deleteText}>Delete</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ))}
+
+                    <View style={styles.commentInputRow}>
+                      <TextInput
+                        value={draft}
+                        onChangeText={setDraft}
+                        placeholder="Add comment..."
+                        placeholderTextColor="#7A8699"
+                        style={styles.commentInput}
+                      />
+                      <Pressable
+                        onPress={handleAddComment}
+                        style={({ pressed }) => [
+                          styles.sendButton,
+                          pressed && styles.buttonPressed,
+                        ]}
+                      >
+                        <Ionicons name="send-outline" size={16} color="#FFFFFF" />
+                      </Pressable>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.emptyText}>Loading post...</Text>
+              )}
             </View>
 
             <BottomNav />
@@ -201,6 +323,19 @@ const styles = StyleSheet.create({
     borderColor: "#CFEFD9",
     padding: 18,
   },
+  notice: {
+    marginBottom: 12,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDF4E4",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 11,
+    lineHeight: 17,
+    fontWeight: "700",
+    color: "#5E6B7F",
+  },
   postHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -208,12 +343,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 999,
     backgroundColor: "#E7F8EB",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   name: {
     fontSize: 12,
@@ -227,12 +360,15 @@ const styles = StyleSheet.create({
     color: "#7A8699",
   },
   imageBox: {
+    width: "100%",
     height: 190,
     borderRadius: 24,
+    marginBottom: 12,
+  },
+  imagePlaceholder: {
     backgroundColor: "#83B66E",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
   },
   caption: {
     fontSize: 12,
@@ -287,11 +423,14 @@ const styles = StyleSheet.create({
   },
   commentRow: {
     flexDirection: "row",
+    alignItems: "flex-start",
     gap: 8,
     marginBottom: 8,
   },
-  commentText: {
+  commentCopy: {
     flex: 1,
+  },
+  commentText: {
     fontSize: 11,
     lineHeight: 17,
     fontWeight: "700",
@@ -333,6 +472,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#4EA955",
     alignItems: "center",
     justifyContent: "center",
+  },
+  emptyText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#7A8699",
+    textAlign: "center",
+    paddingVertical: 24,
   },
   buttonPressed: {
     opacity: 0.9,
